@@ -251,12 +251,12 @@ async function searchStock() {
   const coll = collection(window.fbdb, '제품');
   
   try {
-    // 재고있음 필터
+    // 재고있음 필터 (전체 조회 후 클라이언트 정렬)
     let snap;
     if (stockOnly) {
-      snap = await getDocs(query(coll, where('현재재고', '>', 0), limit(300)));
+      snap = await getDocs(query(coll, where('현재재고', '>', 0), limit(1200)));
     } else {
-      snap = await getDocs(query(coll, limit(300)));
+      snap = await getDocs(query(coll, limit(1200)));
     }
     
     let items = snap.docs.map(d => d.data());
@@ -270,9 +270,18 @@ async function searchStock() {
       );
     }
     
+    // 재고 많은 순 정렬 (재고 있는 것 우선, 그 안에서 수량 내림차순)
+    items.sort((a, b) => {
+      const aStock = +a.현재재고 || 0;
+      const bStock = +b.현재재고 || 0;
+      if (aStock !== bStock) return bStock - aStock;
+      // 재고가 같으면 품명 오름차순
+      return (a.품명||'').localeCompare(b.품명||'');
+    });
+    
     if (!items.length) { empty('stock-result'); return; }
     
-    const rows = items.slice(0, 200).map(r => {
+    const rows = items.slice(0, 300).map(r => {
       const has = r.현재재고 > 0;
       return `<tr>
         <td>${r.대분류||''}</td>
@@ -286,9 +295,9 @@ async function searchStock() {
     }).join('');
     
     document.getElementById('stock-result').innerHTML = `
-      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${items.length}개 품목 ${items.length>200?'(200개 표시)':''}</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${items.length}개 품목 ${items.length>300?'(재고 많은 300개 표시)':''} · 재고 많은 순</div>
       <div class="tbl-wrap"><table>
-        <thead><tr><th>제조사</th><th>품명</th><th>단위</th><th class="num">현재재고</th><th class="num hide-mobile">소매단가</th><th class="num hide-mobile">구매단가</th><th class="hide-mobile">최근판매처</th></tr></thead>
+        <thead><tr><th>제조사</th><th>품명</th><th>단위</th><th class="num">현재재고 ▼</th><th class="num hide-mobile">소매단가</th><th class="num hide-mobile">구매단가</th><th class="hide-mobile">최근판매처</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`;
   } catch(e) {
