@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>대한가축약품 조회</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💊</text></svg>">
+<style>
+:root {
+  --bg:#0f1117; --bg2:#181c26; --bg3:#1e2330;
+  --border:#252b3b; --border2:#2e3650;
+  --text:#e8eaf0; --text2:#8b90a0; --text3:#4a5068;
+  --blue:#4f8ef7; --green:#3ecf8e; --amber:#f0a050;
+  --red:#e05555; --purple:#9b7ff0; --teal:#36c4a0;
+  --r:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;font-size:14px;min-height:100vh}
+
+#login-screen{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:200}
+#login-screen.hide{display:none}
+.login-box{background:var(--bg2);border:1px solid var(--border2);border-radius:16px;padding:36px 32px;width:320px;text-align:center}
+.login-logo{font-size:20px;font-weight:700;margin-bottom:6px}
+.login-logo span{color:var(--blue)}
+.login-sub{font-size:12px;color:var(--text3);margin-bottom:24px}
+.login-box input{width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:12px 14px;color:var(--text);font-size:14px;margin-bottom:10px;outline:none}
+.login-box input:focus{border-color:var(--blue)}
+.login-btn{width:100%;background:var(--blue);border:none;border-radius:8px;padding:12px;color:#fff;font-size:14px;font-weight:700;cursor:pointer}
+.login-btn:hover{opacity:.88}
+.login-err{color:var(--red);font-size:12px;margin-top:8px;min-height:18px}
+.login-cloud{margin-top:16px;font-size:11px;color:var(--text3);display:flex;align-items:center;justify-content:center;gap:6px}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+@keyframes pulse{50%{opacity:.4}}
+
+#app{display:none;flex-direction:column;min-height:100vh}
+#app.show{display:flex}
+
+header{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 16px;height:52px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.logo{font-size:15px;font-weight:700}.logo span{color:var(--blue)}
+.badge{background:var(--bg3);border:1px solid var(--border2);border-radius:20px;padding:3px 10px;font-size:11px;color:var(--text2)}
+
+nav{background:var(--bg2);border-bottom:1px solid var(--border);display:flex;overflow-x:auto;-webkit-overflow-scrolling:touch}
+nav::-webkit-scrollbar{display:none}
+.nav-tab{flex-shrink:0;padding:12px 20px;font-size:13px;font-weight:500;color:var(--text2);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+.nav-tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+
+main{flex:1;padding:16px;max-width:1100px;width:100%;margin:0 auto}
+
+.search-row{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.search-input{flex:1;min-width:180px;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:10px 14px;color:var(--text);font-size:14px;outline:none}
+.search-input:focus{border-color:var(--blue)}
+.search-btn{background:var(--blue);border:none;border-radius:8px;padding:10px 18px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.search-btn:hover{opacity:.88}
+.toggle-btn{background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:10px 14px;color:var(--text2);font-size:12px;cursor:pointer;white-space:nowrap}
+.toggle-btn.on{background:var(--teal);border-color:var(--teal);color:#fff}
+select.filter{background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;color:var(--text);font-size:13px;outline:none;cursor:pointer}
+
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-bottom:14px}
+.card-title{font-size:12px;font-weight:600;color:var(--text2);margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px}
+
+.kpi-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px}
+@media(min-width:600px){.kpi-grid{grid-template-columns:repeat(4,1fr)}}
+.kpi{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;position:relative;overflow:hidden}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.kpi.b::before{background:var(--blue)}.kpi.g::before{background:var(--green)}
+.kpi.a::before{background:var(--amber)}.kpi.p::before{background:var(--purple)}
+.kpi-lbl{font-size:10px;color:var(--text3);margin-bottom:6px;letter-spacing:.4px;text-transform:uppercase}
+.kpi-val{font-size:22px;font-weight:700;line-height:1}
+.kpi-sub{font-size:11px;color:var(--text3);margin-top:5px}
+
+.tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{width:100%;border-collapse:collapse;min-width:500px}
+th{font-size:10px;color:var(--text3);text-align:left;padding:0 10px 8px;font-weight:500;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid var(--bg3);font-size:12px;color:var(--text);white-space:nowrap}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--bg3)}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.tag{display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:600}
+.tag-매출{background:#1a2d4f;color:var(--blue)}
+.tag-매입{background:#2d2010;color:var(--amber)}
+.tag-수금{background:#0f2d1f;color:var(--green)}
+.tag-지급{background:#2d1010;color:var(--red)}
+.tag-재고있음{background:#0f2d1f;color:var(--green)}
+.tag-재고없음{background:#2d1010;color:var(--red)}
+.tag-외상{background:#1e1e3a;color:var(--purple)}
+.tag-현금{background:#1a2d1a;color:var(--green)}
+
+.empty{text-align:center;padding:48px 0;color:var(--text3);font-size:13px}
+.loading{text-align:center;padding:32px;color:var(--text3)}
+.spinner{display:inline-block;width:18px;height:18px;border:2px solid var(--border2);border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite;margin-right:8px;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.pos{color:var(--amber)}.neg{color:var(--green)}.zero{color:var(--text3)}
+@media(max-width:600px){.hide-mobile{display:none}}
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">대한<span>가축약품</span></div>
+    <div class="login-sub">클라우드 조회 시스템</div>
+    <input type="password" id="token-input" placeholder="접속 코드 입력" onkeydown="if(event.key==='Enter')doLogin()">
+    <button class="login-btn" onclick="doLogin()">접속</button>
+    <div class="login-err" id="login-err"></div>
+    <div class="login-cloud"><span class="dot"></span> Firebase 클라우드 · 24시간 조회 가능</div>
+  </div>
+</div>
+
+<div id="app">
+  <header>
+    <div class="logo">대한<span>가축약품</span></div>
+    <div class="badge" id="data-date">-</div>
+  </header>
+
+  <nav>
+    <div class="nav-tab active" onclick="showTab('stock')">재고 조회</div>
+    <div class="nav-tab" onclick="showTab('balance')">거래처 잔액</div>
+    <div class="nav-tab" onclick="showTab('txn')">거래내역</div>
+    <div class="nav-tab" onclick="showTab('info')">거래처 정보</div>
+  </nav>
+
+  <main>
+    <div id="tab-stock">
+      <div class="search-row">
+        <input class="search-input" id="stock-q" placeholder="품명 또는 제조사 검색..." onkeydown="if(event.key==='Enter')searchStock()">
+        <button class="toggle-btn" id="stock-only-btn" onclick="toggleStockOnly()">재고있음만</button>
+        <button class="search-btn" onclick="searchStock()">검색</button>
+      </div>
+      <div id="stock-result"></div>
+    </div>
+
+    <div id="tab-balance" style="display:none">
+      <div class="search-row">
+        <input class="search-input" id="bal-q" placeholder="거래처명 검색..." onkeydown="if(event.key==='Enter')searchBalance()">
+        <button class="toggle-btn" id="bal-unpaid-btn" onclick="toggleUnpaid()">미수금만</button>
+        <button class="search-btn" onclick="searchBalance()">검색</button>
+      </div>
+      <div id="balance-result"></div>
+    </div>
+
+    <div id="tab-txn" style="display:none">
+      <div class="search-row">
+        <input class="search-input" id="txn-company" placeholder="거래처명..." onkeydown="if(event.key==='Enter')searchTxn()">
+        <input class="search-input" id="txn-product" placeholder="품명..." onkeydown="if(event.key==='Enter')searchTxn()">
+        <select class="filter" id="txn-acct" onchange="searchTxn()">
+          <option value="">전체</option>
+          <option value="매출">매출</option>
+          <option value="매입">매입</option>
+          <option value="수금">수금</option>
+          <option value="지급">지급</option>
+        </select>
+        <button class="search-btn" onclick="searchTxn()">검색</button>
+      </div>
+      <div id="txn-result"></div>
+    </div>
+
+    <div id="tab-info" style="display:none">
+      <div class="search-row">
+        <input class="search-input" id="info-q" placeholder="거래처명 검색..." onkeydown="if(event.key==='Enter')searchInfo()">
+        <button class="search-btn" onclick="searchInfo()">검색</button>
+      </div>
+      <div id="info-result"></div>
+    </div>
+  </main>
+</div>
+
+<!-- Firebase SDK -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getFirestore, collection, query, where, getDocs, orderBy, limit, doc, getDoc } 
+  from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+// ⚠️ Firebase 설정 - 자기 값으로 교체
+const firebaseConfig = {
+  apiKey: "여기에_apiKey_붙여넣기",
+  authDomain: "daehan-adb1d.firebaseapp.com",
+  projectId: "daehan-adb1d",
+  storageBucket: "daehan-adb1d.firebasestorage.app",
+  messagingSenderId: "여기에_messagingSenderId",
+  appId: "여기에_appId"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// 전역으로 노출
+window.fbdb = db;
+window.fbFuncs = { collection, query, where, getDocs, orderBy, limit, doc, getDoc };
+
+// 초기화 완료 알림
+window.dispatchEvent(new Event('fbready'));
+</script>
+
+<script>
+// ── 상태 ─────────────────────────────────────────
+let TOKEN = '';
+let stockOnly = false, unpaidOnly = false;
+const ACCESS_CODE = 'daehan2024';  // 접속 코드 (원하면 변경)
+let dbReady = false;
+
+window.addEventListener('fbready', () => { dbReady = true; });
+
+// ── 로그인 ────────────────────────────────────────
+function doLogin() {
+  const t = document.getElementById('token-input').value.trim();
+  if (t !== ACCESS_CODE) {
+    document.getElementById('login-err').textContent = '접속 코드가 틀렸습니다';
+    return;
+  }
+  if (!dbReady) {
+    document.getElementById('login-err').textContent = '연결 중... 잠시 후 다시 시도하세요';
+    setTimeout(() => { if (dbReady) doLogin(); }, 1500);
+    return;
+  }
+  document.getElementById('login-screen').classList.add('hide');
+  document.getElementById('app').classList.add('show');
+  document.getElementById('data-date').textContent = new Date().toLocaleDateString('ko-KR');
+  searchStock();
+}
+window.doLogin = doLogin;
+
+// ── 유틸 ─────────────────────────────────────────
+function fmt억(n) {
+  n = +n || 0;
+  if (n >= 1e8) return (n/1e8).toFixed(1) + '억';
+  if (n >= 1e4) return Math.round(n/1e4).toLocaleString() + '만';
+  return n.toLocaleString();
+}
+function fmtNum(n) { return (+n||0).toLocaleString(); }
+function loading(id) { document.getElementById(id).innerHTML = '<div class="loading"><span class="spinner"></span>클라우드 조회 중...</div>'; }
+function empty(id) { document.getElementById(id).innerHTML = '<div class="empty">검색 결과가 없습니다</div>'; }
+
+// ── 탭 ───────────────────────────────────────────
+function showTab(name) {
+  ['stock','balance','txn','info'].forEach(t => {
+    document.getElementById('tab-'+t).style.display = t === name ? '' : 'none';
+  });
+  document.querySelectorAll('.nav-tab').forEach((el,i) => {
+    el.classList.toggle('active', ['stock','balance','txn','info'][i] === name);
+  });
+}
+window.showTab = showTab;
+
+// ── 재고 조회 ─────────────────────────────────────
+async function searchStock() {
+  const q = document.getElementById('stock-q').value.trim().toLowerCase();
+  loading('stock-result');
+  
+  const { collection, query, getDocs, where, limit } = window.fbFuncs;
+  const coll = collection(window.fbdb, '제품');
+  
+  try {
+    // 재고있음 필터
+    let snap;
+    if (stockOnly) {
+      snap = await getDocs(query(coll, where('현재재고', '>', 0), limit(300)));
+    } else {
+      snap = await getDocs(query(coll, limit(300)));
+    }
+    
+    let items = snap.docs.map(d => d.data());
+    
+    // 클라이언트 필터링 (부분 일치)
+    if (q) {
+      items = items.filter(r => 
+        (r.품명||'').toLowerCase().includes(q) || 
+        (r.대분류||'').toLowerCase().includes(q) ||
+        (r.품명초성||'').includes(q)
+      );
+    }
+    
+    if (!items.length) { empty('stock-result'); return; }
+    
+    const rows = items.slice(0, 200).map(r => {
+      const has = r.현재재고 > 0;
+      return `<tr>
+        <td>${r.대분류||''}</td>
+        <td><strong>${r.품명||''}</strong></td>
+        <td>${r.단위||''}</td>
+        <td class="num"><span class="tag ${has?'tag-재고있음':'tag-재고없음'}">${fmtNum(r.현재재고)}</span></td>
+        <td class="num hide-mobile">${fmtNum(r.판매소매단가)}</td>
+        <td class="num hide-mobile">${fmtNum(r.구매최종단가)}</td>
+        <td class="hide-mobile" style="color:var(--text3);font-size:11px">${r.판매최종회사||'-'}</td>
+      </tr>`;
+    }).join('');
+    
+    document.getElementById('stock-result').innerHTML = `
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${items.length}개 품목 ${items.length>200?'(200개 표시)':''}</div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>제조사</th><th>품명</th><th>단위</th><th class="num">현재재고</th><th class="num hide-mobile">소매단가</th><th class="num hide-mobile">구매단가</th><th class="hide-mobile">최근판매처</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+  } catch(e) {
+    document.getElementById('stock-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+  }
+}
+window.searchStock = searchStock;
+
+function toggleStockOnly() {
+  stockOnly = !stockOnly;
+  document.getElementById('stock-only-btn').classList.toggle('on', stockOnly);
+  searchStock();
+}
+window.toggleStockOnly = toggleStockOnly;
+
+// ── 거래처 잔액 ───────────────────────────────────
+async function searchBalance() {
+  const q = document.getElementById('bal-q').value.trim().toLowerCase();
+  loading('balance-result');
+  
+  const { collection, query, getDocs, orderBy, limit } = window.fbFuncs;
+  const coll = collection(window.fbdb, '잔액');
+  
+  try {
+    const snap = await getDocs(query(coll, orderBy('잔액', 'desc'), limit(500)));
+    let items = snap.docs.map(d => d.data());
+    
+    if (q) items = items.filter(r => (r.회사||'').toLowerCase().includes(q));
+    if (unpaidOnly) items = items.filter(r => r.잔액 > 0);
+    
+    if (!items.length) { empty('balance-result'); return; }
+    
+    const rows = items.slice(0, 300).map(r => {
+      const cls = r.잔액 > 0 ? 'pos' : r.잔액 < 0 ? 'neg' : 'zero';
+      return `<tr onclick="goTxnByCompany('${(r.회사||'').replace(/'/g,"\\'")}')" style="cursor:pointer">
+        <td><strong>${r.회사||''}</strong></td>
+        <td class="num">${fmt억(r.총매출)}</td>
+        <td class="num">${fmt억(r.총수금)}</td>
+        <td class="num ${cls}"><strong>${fmt억(r.잔액)}</strong></td>
+        <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.최종매출일||''}</td>
+      </tr>`;
+    }).join('');
+    
+    document.getElementById('balance-result').innerHTML = `
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${items.length}개 거래처 · 클릭하면 거래내역으로</div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>거래처</th><th class="num">총 매출</th><th class="num">총 수금</th><th class="num">잔액</th><th class="hide-mobile">최종거래일</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+  } catch(e) {
+    document.getElementById('balance-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+  }
+}
+window.searchBalance = searchBalance;
+
+function toggleUnpaid() {
+  unpaidOnly = !unpaidOnly;
+  document.getElementById('bal-unpaid-btn').classList.toggle('on', unpaidOnly);
+  searchBalance();
+}
+window.toggleUnpaid = toggleUnpaid;
+
+function goTxnByCompany(name) {
+  showTab('txn');
+  document.getElementById('txn-company').value = name;
+  searchTxn();
+}
+window.goTxnByCompany = goTxnByCompany;
+
+// ── 거래내역 ──────────────────────────────────────
+async function searchTxn() {
+  const company = document.getElementById('txn-company').value.trim();
+  const product = document.getElementById('txn-product').value.trim().toLowerCase();
+  const acct    = document.getElementById('txn-acct').value;
+  
+  if (!company && !product && !acct) {
+    document.getElementById('txn-result').innerHTML = '<div class="empty">거래처, 품명, 또는 구분 중 하나 이상 선택하세요</div>';
+    return;
+  }
+  
+  loading('txn-result');
+  
+  const { collection, query, getDocs, where, orderBy, limit } = window.fbFuncs;
+  const coll = collection(window.fbdb, '전표_세부');
+  
+  try {
+    let constraints = [];
+    if (company) constraints.push(where('회사', '==', company));
+    if (acct)    constraints.push(where('계정', '==', acct));
+    constraints.push(orderBy('날짜', 'desc'));
+    constraints.push(limit(500));
+    
+    const snap = await getDocs(query(coll, ...constraints));
+    let items = snap.docs.map(d => d.data());
+    
+    if (product) items = items.filter(r => (r.품명||'').toLowerCase().includes(product));
+    
+    if (!items.length) { empty('txn-result'); return; }
+    
+    // 회사별 잔액 계산 (회사 1곳 필터일 때만)
+    let showBalance = false;
+    let balanceMap = {};
+    if (company) {
+      // 해당 회사의 모든 매출/수금 헤더를 가져와 시간순 누계
+      const headColl = collection(window.fbdb, '전표_묶음');
+      const hsnap = await getDocs(query(headColl, where('회사','==',company), orderBy('날짜','asc'), limit(2000)));
+      let running = 0;
+      hsnap.docs.forEach(d => {
+        const r = d.data();
+        if (r.계정 === '매출') running += (+r.합계||0);
+        else if (r.계정 === '수금') running -= (+r.입금액||0);
+        balanceMap[r.전표번호] = running;
+      });
+      showBalance = true;
+    }
+    
+    const rows = items.map(r => {
+      const tagCls = `tag-${r.계정}`;
+      const bal = balanceMap[r.전표번호];
+      const balCell = showBalance 
+        ? (bal!==undefined ? `<td class="num ${bal>0?'pos':bal<0?'neg':'zero'}"><strong>${fmtNum(bal)}</strong></td>` : `<td class="num" style="color:var(--text3)">-</td>`)
+        : '';
+      return `<tr>
+        <td style="color:var(--text3)">${r.날짜||''}</td>
+        <td><strong>${r.회사||''}</strong></td>
+        <td><span class="tag ${tagCls}">${r.계정||''}</span></td>
+        <td>${r.품명||'-'}</td>
+        <td class="num hide-mobile">${r.수량>0?fmtNum(r.수량):'-'}</td>
+        <td class="num hide-mobile">${r.단가>0?fmtNum(r.단가):'-'}</td>
+        <td class="num">${r.공급가액>0?fmtNum(r.공급가액):'-'}</td>
+        ${balCell}
+      </tr>`;
+    }).join('');
+    
+    const balHeader = showBalance ? '<th class="num">잔액</th>' : '';
+    
+    document.getElementById('txn-result').innerHTML = `
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${items.length}건</div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>날짜</th><th>거래처</th><th>구분</th><th>품명</th><th class="num hide-mobile">수량</th><th class="num hide-mobile">단가</th><th class="num">금액</th>${balHeader}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+  } catch(e) {
+    document.getElementById('txn-result').innerHTML = `<div class="empty">오류: ${e.message}<br>인덱스 생성이 필요할 수 있습니다. 콘솔을 확인하세요.</div>`;
+    console.error(e);
+  }
+}
+window.searchTxn = searchTxn;
+
+// ── 거래처 정보 ────────────────────────────────
+async function searchInfo() {
+  const q = document.getElementById('info-q').value.trim().toLowerCase();
+  loading('info-result');
+  
+  const { collection, query, getDocs, limit } = window.fbFuncs;
+  const coll = collection(window.fbdb, '거래처');
+  
+  try {
+    const snap = await getDocs(query(coll, limit(700)));
+    let items = snap.docs.map(d => d.data());
+    if (q) items = items.filter(r => (r.회사||'').toLowerCase().includes(q));
+    
+    if (!items.length) { empty('info-result'); return; }
+    
+    const rows = items.slice(0, 200).map(r => `<tr>
+      <td><strong>${r.회사||''}</strong></td>
+      <td>${r.이름||''}</td>
+      <td>${r.전화1||''}</td>
+      <td class="hide-mobile">${r.분류||''}</td>
+      <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.주소||''}</td>
+      <td>${r.담당사원||''}</td>
+    </tr>`).join('');
+    
+    document.getElementById('info-result').innerHTML = `
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${items.length}개 거래처</div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>거래처</th><th>담당자</th><th>전화</th><th class="hide-mobile">분류</th><th class="hide-mobile">주소</th><th>담당사원</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+  } catch(e) {
+    document.getElementById('info-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+  }
+}
+window.searchInfo = searchInfo;
+</script>
+</body>
+</html>
