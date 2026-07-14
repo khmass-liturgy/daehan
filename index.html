@@ -394,10 +394,15 @@ async function searchTxn() {
     if (company) {
       // 해당 회사의 모든 매출/수금 헤더를 가져와 시간순 누계
       const headColl = collection(window.fbdb, '전표_묶음');
-      const hsnap = await getDocs(query(headColl, where('회사','==',company), orderBy('날짜','asc'), limit(2000)));
+      const hsnap = await getDocs(query(headColl, where('회사','==',company), orderBy('날짜','asc'), limit(5000)));
+      // JS에서 날짜+전표번호로 재정렬 (같은 날 여러 전표 안정 정렬)
+      const headers = hsnap.docs.map(d => d.data());
+      headers.sort((a,b) => {
+        if (a.날짜 !== b.날짜) return a.날짜.localeCompare(b.날짜);
+        return (a.전표번호||'').localeCompare(b.전표번호||'');
+      });
       let running = 0;
-      hsnap.docs.forEach(d => {
-        const r = d.data();
+      headers.forEach(r => {
         if (r.계정 === '매출') running += (+r.합계||0);
         else if (r.계정 === '수금') running -= (+r.입금액||0);
         balanceMap[r.전표번호] = running;
