@@ -313,42 +313,83 @@ function toggleStockOnly() {
 }
 window.toggleStockOnly = toggleStockOnly;
 
-// ── 거래처 잔액 ───────────────────────────────────
+// ── 거래처 잔액 (실시간 계산) ──────────────────────
 async function searchBalance() {
   const q = document.getElementById('bal-q').value.trim().toLowerCase();
   loading('balance-result');
   
-  const { collection, query, getDocs, orderBy, limit } = window.fbFuncs;
-  const coll = collection(window.fbdb, '잔액');
+  const { collection, query, getDocs, orderBy, limit, where } = window.fbFuncs;
   
   try {
-    const snap = await getDocs(query(coll, orderBy('잔액', 'desc'), limit(500)));
-    let items = snap.docs.map(d => d.data());
+    // 방법: 전표_묶음에서 매출+수금 데이터 전체를 가져와 회사별로 집계
+    // (잔액 컬렉션에 의존하지 않아 항상 정확)
+    const slipColl = collection(window.fbdb, '전표_묶음');
+    const [salesSnap, colSnap] = await Promise.all([
+      getDocs(query(slipColl, where('계정','==','매출'), limit(20000))),
+      getDocs(query(slipColl, where('계정','==','수금'), limit(20000)))
+    ]);
     
+    // 회사별 집계
+    const map = new Map();
+    salesSnap.docs.forEach(d => {
+      const r = d.data();
+      const c = r.회사 || '';
+      if (!c) return;
+      const cur = map.get(c) || { 회사:c, 총매출:0, 총수금:0, 최종매출일:'' };
+      cur.총매출 += (+r.합계||0);
+      if ((r.날짜||'') > cur.최종매출일) cur.최종매출일 = r.날짜 || '';
+      map.set(c, cur);
+    });
+    colSnap.docs.forEach(d => {
+      const r = d.data();
+      const c = r.회사 || '';
+      if (!c) return;
+      const cur = map.get(c) || { 회사:c, 총매출:0, 총수금:0, 최종매출일:'' };
+      cur.총수금 += (+r.입금액||0);
+      map.set(c, cur);
+    });
+    
+    let items = [...map.values()];
+    items.forEach(r => r.잔액 = r.총매출 - r.총수금);
+    
+    // 필터
     if (q) items = items.filter(r => (r.회사||'').toLowerCase().includes(q));
     if (unpaidOnly) items = items.filter(r => r.잔액 > 0);
+    
+    // 잔액 큰 순 정렬
+    items.sort((a,b) => b.잔액 - a.잔액);
     
     if (!items.length) { empty('balance-result'); return; }
     
     const rows = items.slice(0, 300).map(r => {
       const cls = r.잔액 > 0 ? 'pos' : r.잔액 < 0 ? 'neg' : 'zero';
-      return `<tr onclick="goTxnByCompany('${(r.회사||'').replace(/'/g,"\\'")}')" style="cursor:pointer">
-        <td><strong>${r.회사||''}</strong></td>
+      const safeName = (r.회사||'').replace(/'/g,"\\'");
+      return `<tr>
+        <td onclick="goTxnByCompany('${safeName}')" style="cursor:pointer" title="거래내역 보기">
+          <strong style="color:var(--blue)">${r.회사||''}</strong>
+          <span style="font-size:10px;color:var(--text3);margin-left:6px">📋 거래내역</span>
+        </td>
         <td class="num">${fmt억(r.총매출)}</td>
         <td class="num">${fmt억(r.총수금)}</td>
-        <td class="num ${cls}"><strong>${fmt억(r.잔액)}</strong></td>
+        <td class="num ${cls}" onclick="showBalanceDetail('${safeName}', ${r.총매출}, ${r.총수금}, ${r.잔액})" style="cursor:pointer" title="잔액 상세 보기">
+          <strong>${fmtNum(r.잔액)}</strong>
+          <span style="font-size:10px;color:var(--text3);margin-left:4px">🔍</span>
+        </td>
         <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.최종매출일||''}</td>
       </tr>`;
     }).join('');
     
     document.getElementById('balance-result').innerHTML = `
-      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${items.length}개 거래처 · 클릭하면 거래내역으로</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
+        ${items.length}개 거래처 · <span style="color:var(--blue)">거래처명</span>=거래내역 이동 · <span style="color:var(--amber)">잔액</span>=상세보기
+      </div>
       <div class="tbl-wrap"><table>
-        <thead><tr><th>거래처</th><th class="num">총 매출</th><th class="num">총 수금</th><th class="num">잔액</th><th class="hide-mobile">최종거래일</th></tr></thead>
+        <thead><tr><th>거래처</th><th class="num">총 매출</th><th class="num">총 수금</th><th class="num">잔액 ▼</th><th class="hide-mobile">최종거래일</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`;
   } catch(e) {
     document.getElementById('balance-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+    console.error(e);
   }
 }
 window.searchBalance = searchBalance;
@@ -366,6 +407,49 @@ function goTxnByCompany(name) {
   searchTxn();
 }
 window.goTxnByCompany = goTxnByCompany;
+
+// 잔액 상세보기 (팝업)
+function showBalanceDetail(name, sales, collected, balance) {
+  const html = `
+    <div id="bal-detail-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px" onclick="closeBalanceDetail(event)">
+      <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:14px;padding:24px;max-width:420px;width:100%" onclick="event.stopPropagation()">
+        <div style="font-size:16px;font-weight:700;margin-bottom:6px">${name}</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:20px">잔액 상세</div>
+        
+        <div style="display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--bg3)">
+          <span style="color:var(--text2)">총 매출</span>
+          <span style="font-size:16px;color:var(--blue);font-weight:600">${fmtNum(sales)}원</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--bg3)">
+          <span style="color:var(--text2)">총 수금</span>
+          <span style="font-size:16px;color:var(--green);font-weight:600">- ${fmtNum(collected)}원</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:16px 0 8px;border-top:2px solid var(--border);margin-top:8px">
+          <span style="font-size:14px;font-weight:600">잔액 (미수금)</span>
+          <span style="font-size:20px;color:${balance>0?'var(--amber)':balance<0?'var(--green)':'var(--text3)'};font-weight:700">${fmtNum(balance)}원</span>
+        </div>
+        
+        <div style="font-size:11px;color:var(--text3);text-align:center;margin-top:10px">
+          수금률 ${sales>0?((collected/sales)*100).toFixed(1):0}%
+        </div>
+        
+        <div style="display:flex;gap:8px;margin-top:20px">
+          <button class="search-btn" style="flex:1;background:var(--bg3);color:var(--text2);border:1px solid var(--border2)" onclick="closeBalanceDetail()">닫기</button>
+          <button class="search-btn" style="flex:1" onclick="closeBalanceDetail();goTxnByCompany('${name.replace(/'/g,"\\'")}')">거래내역 보기</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+window.showBalanceDetail = showBalanceDetail;
+
+function closeBalanceDetail(e) {
+  if (e && e.target.id !== 'bal-detail-modal') return;
+  const m = document.getElementById('bal-detail-modal');
+  if (m) m.remove();
+}
+window.closeBalanceDetail = closeBalanceDetail;
 
 // ── 거래내역 ──────────────────────────────────────
 async function searchTxn() {
