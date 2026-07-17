@@ -698,7 +698,8 @@ async function searchTxn() {
       });
       let running = 0;
       headers.forEach(r => {
-        if (r.계정 === '매출') running += (+r.합계||0);
+        // 외상 매출만 미수금에 반영 (현금/무상 매출은 즉시 결제되어 제외)
+        if (r.계정 === '매출' && r.결재수단 === '외상') running += (+r.합계||0);
         else if (r.계정 === '수금') running -= (+r.입금액||0);
         balanceMap[r.전표번호] = running;
       });
