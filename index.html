@@ -139,6 +139,16 @@ tr:hover td{background:var(--bg3)}
         <button class="search-btn" onclick="searchStock()">검색</button>
       </div>
       
+      <!-- 제품 축종 필터 -->
+      <div id="stock-species-row" class="search-row">
+        <button class="toggle-btn on" id="sp-all" onclick="setStockSpecies('all')">축종 전체</button>
+        <button class="toggle-btn" id="sp-양계" onclick="setStockSpecies('양계')">🐔 양계</button>
+        <button class="toggle-btn" id="sp-양돈" onclick="setStockSpecies('양돈')">🐷 양돈</button>
+        <button class="toggle-btn" id="sp-축우" onclick="setStockSpecies('축우')">🐄 축우</button>
+        <button class="toggle-btn" id="sp-공통" onclick="setStockSpecies('공통')">공통</button>
+        <button class="toggle-btn" id="sp-미지정" onclick="setStockSpecies('미지정')">미지정</button>
+      </div>
+      
       <!-- 거래처 구매내역 모드 -->
       <div id="stock-search-cust" class="search-row" style="display:none">
         <input class="search-input" id="stock-cust-q" placeholder="거래처명 입력 (예: 유월농장)" onkeydown="if(event.key==='Enter')searchCustProducts()">
@@ -254,6 +264,7 @@ function doLogin() {
   document.getElementById('app').classList.add('show');
   document.getElementById('data-date').textContent = new Date().toLocaleDateString('ko-KR');
   loadCategoryMap();  // 축종 매핑 로드 (백그라운드)
+  loadProductSpecies();  // 제품 축종 로드
   searchStock();
 }
 window.doLogin = doLogin;
@@ -283,7 +294,103 @@ window.showTab = showTab;
 
 // ── 재고 조회 ─────────────────────────────────────
 let stockMode = 'all';
+let stockSpecies = 'all';  // 제품 축종 필터
 let mfgListLoaded = false;
+
+// 제품 축종 수동 매핑 캐시 (Firestore)
+let 제품축종 = {};  // { 품명: '양계' | '양돈' | '축우' | '공통' }
+
+// 제품 축종 매핑 로드
+async function loadProductSpecies() {
+  const { collection, query, getDocs, limit } = window.fbFuncs;
+  try {
+    const snap = await getDocs(query(collection(window.fbdb, '제품축종'), limit(3000)));
+    제품축종 = {};
+    snap.docs.forEach(d => {
+      const r = d.data();
+      if (r.품명 && r.축종) 제품축종[r.품명] = r.축종;
+    });
+    console.log(`제품축종 로드: ${Object.keys(제품축종).length}개`);
+  } catch(e) {
+    console.warn('제품축종 로드 실패', e);
+  }
+}
+
+// 제품 축종 저장
+async function saveProductSpecies(품명, 축종) {
+  const { doc, setDoc, deleteDoc } = window.fbFuncs;
+  const safeId = 품명.replace(/\//g,'_').replace(/\./g,'_').replace(/#/g,'_').replace(/\[/g,'_').replace(/\]/g,'_');
+  const ref = doc(window.fbdb, '제품축종', safeId);
+  try {
+    if (축종 === 'clear') {
+      await deleteDoc(ref);
+      delete 제품축종[품명];
+    } else {
+      await setDoc(ref, { 품명, 축종, 갱신일시: new Date().toISOString() });
+      제품축종[품명] = 축종;
+    }
+    return true;
+  } catch(e) {
+    alert('저장 실패: ' + e.message);
+    return false;
+  }
+}
+window.saveProductSpecies = saveProductSpecies;
+
+// 제품 축종 편집 팝업
+function editProductSpecies(품명) {
+  const 현재 = 제품축종[품명] || '미지정';
+  const options = ['양계','양돈','축우','공통'];
+  const 색상map = { '양계':'#f0a050','양돈':'#e05555','축우':'#7F77DD','공통':'#36c4a0','미지정':'var(--text3)' };
+  const safe = 품명.replace(/'/g,"\\'");
+  
+  const html = `
+    <div id="prod-sp-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:400;display:flex;align-items:center;justify-content:center;padding:16px" onclick="closeProdSp(event)">
+      <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:14px;padding:22px;max-width:400px;width:100%" onclick="event.stopPropagation()">
+        <div style="font-size:15px;font-weight:700;margin-bottom:4px">${품명}</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:18px">현재 축종: <span style="color:${색상map[현재]};font-weight:600">${현재}</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          ${options.map(opt => `
+            <button onclick="doSetProductSpecies('${safe}','${opt}')" 
+              style="padding:12px;border-radius:8px;background:var(--bg3);border:1px solid var(--border2);color:${색상map[opt]};font-size:14px;font-weight:600;cursor:pointer;${현재===opt?'border-color:'+색상map[opt]+';background:'+색상map[opt]+'22':''}">
+              ${opt}
+            </button>
+          `).join('')}
+        </div>
+        <button onclick="doSetProductSpecies('${safe}','clear')" 
+          style="width:100%;margin-top:12px;padding:9px;border-radius:8px;background:transparent;border:1px solid var(--border2);color:var(--text2);font-size:12px;cursor:pointer">
+          미지정으로 되돌리기
+        </button>
+        <button onclick="closeProdSp()" 
+          style="width:100%;margin-top:8px;padding:9px;border-radius:8px;background:var(--bg3);border:none;color:var(--text2);font-size:12px;cursor:pointer">닫기</button>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+window.editProductSpecies = editProductSpecies;
+
+async function doSetProductSpecies(품명, 축종) {
+  const ok = await saveProductSpecies(품명, 축종);
+  if (ok) { closeProdSp(); searchStock(); }
+}
+window.doSetProductSpecies = doSetProductSpecies;
+
+function closeProdSp(e) {
+  if (e && e.target.id !== 'prod-sp-modal') return;
+  const m = document.getElementById('prod-sp-modal');
+  if (m) m.remove();
+}
+window.closeProdSp = closeProdSp;
+
+function setStockSpecies(sp) {
+  stockSpecies = sp;
+  ['all','양계','양돈','축우','공통','미지정'].forEach(s => {
+    const btn = document.getElementById('sp-'+s);
+    if (btn) btn.classList.toggle('on', s === sp);
+  });
+  searchStock();
+}
+window.setStockSpecies = setStockSpecies;
 
 function setStockMode(mode) {
   stockMode = mode;
@@ -293,16 +400,19 @@ function setStockMode(mode) {
   
   const normalRow = document.getElementById('stock-search-normal');
   const custRow = document.getElementById('stock-search-cust');
+  const speciesRow = document.getElementById('stock-species-row');
   const mfgSelect = document.getElementById('stock-mfg');
   const qInput = document.getElementById('stock-q');
   
   if (mode === 'cust') {
     normalRow.style.display = 'none';
     custRow.style.display = 'flex';
+    speciesRow.style.display = 'none';
     document.getElementById('stock-result').innerHTML = '<div class="empty">거래처명을 입력하고 조회하세요</div>';
   } else {
     normalRow.style.display = 'flex';
     custRow.style.display = 'none';
+    speciesRow.style.display = 'flex';
     if (mode === 'mfg') {
       mfgSelect.style.display = '';
       qInput.placeholder = '품명 검색 (제조사 선택과 함께)';
@@ -368,6 +478,14 @@ async function searchStock() {
       );
     }
     
+    // 제품 축종 필터
+    if (stockSpecies !== 'all') {
+      items = items.filter(r => {
+        const sp = 제품축종[r.품명] || '미지정';
+        return sp === stockSpecies;
+      });
+    }
+    
     // 재고 많은 순 정렬
     items.sort((a, b) => {
       const aStock = +a.현재재고 || 0;
@@ -378,24 +496,34 @@ async function searchStock() {
     
     if (!items.length) { empty('stock-result'); return; }
     
+    const 색상map = { '양계':'#f0a050','양돈':'#e05555','축우':'#7F77DD','공통':'#36c4a0','미지정':'var(--text3)' };
+    
     const rows = items.slice(0, 300).map(r => {
       const has = r.현재재고 > 0;
+      const sp = 제품축종[r.품명] || '미지정';
+      const spColor = 색상map[sp];
+      const safe = (r.품명||'').replace(/'/g,"\\'");
       return `<tr>
         <td>${r.대분류||''}</td>
         <td><strong>${r.품명||''}</strong></td>
-        <td>${r.단위||''}</td>
+        <td>
+          <span onclick="editProductSpecies('${safe}')" title="클릭하여 축종 지정"
+            style="cursor:pointer;font-size:10px;padding:2px 7px;border-radius:8px;background:${spColor}22;color:${spColor};font-weight:600;border:1px solid ${sp!=='미지정'?spColor:'transparent'}">
+            ${sp}${sp!=='미지정'?' ✎':' +'}
+          </span>
+        </td>
         <td class="num"><span class="tag ${has?'tag-재고있음':'tag-재고없음'}">${fmtNum(r.현재재고)}</span></td>
         <td class="num hide-mobile">${fmtNum(r.판매소매단가)}</td>
         <td class="num hide-mobile">${fmtNum(r.구매최종단가)}</td>
-        <td class="hide-mobile" style="color:var(--text3);font-size:11px">${r.판매최종회사||'-'}</td>
       </tr>`;
     }).join('');
     
     const 제목 = mfg ? `[${mfg}] ` : '';
+    const 축종제목 = stockSpecies !== 'all' ? `[${stockSpecies}] ` : '';
     document.getElementById('stock-result').innerHTML = `
-      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${제목}${items.length}개 품목 ${items.length>300?'(재고 많은 300개 표시)':''} · 재고 많은 순</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${제목}${축종제목}${items.length}개 품목 · 축종 태그 클릭하여 지정</div>
       <div class="tbl-wrap"><table>
-        <thead><tr><th>제조사</th><th>품명</th><th>단위</th><th class="num">현재재고 ▼</th><th class="num hide-mobile">소매단가</th><th class="num hide-mobile">구매단가</th><th class="hide-mobile">최근판매처</th></tr></thead>
+        <thead><tr><th>제조사</th><th>품명</th><th>축종</th><th class="num">현재재고 ▼</th><th class="num hide-mobile">소매단가</th><th class="num hide-mobile">구매단가</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`;
   } catch(e) {
@@ -754,6 +882,7 @@ const MIN_BALANCE = 50000;  // 5만원 이하 제외
 
 // 축종 수동 매핑 캐시 (Firestore에서 로드)
 let 축종매핑 = {};  // { 회사명: '양계' | '양돈' | '축우' | ... }
+let 거래처추론축종 = {};  // { 회사명: '양계' } - 제품 구매이력 기반 자동 추론
 
 // 축종 매핑 Firestore에서 로드
 async function loadCategoryMap() {
@@ -768,6 +897,47 @@ async function loadCategoryMap() {
     console.log(`축종매핑 로드: ${Object.keys(축종매핑).length}개`);
   } catch(e) {
     console.warn('축종매핑 로드 실패', e);
+  }
+}
+
+// 제품 구매이력 기반 거래처 축종 추론
+// 각 거래처가 산 제품들의 축종을 집계, 가장 많이 산 축종으로 판단 (공통/미지정 제외)
+async function inferCompanySpecies() {
+  const { collection, query, getDocs, where, orderBy, limit } = window.fbFuncs;
+  try {
+    // 제품축종이 로드 안 됐으면 먼저 로드
+    if (Object.keys(제품축종).length === 0) await loadProductSpecies();
+    // 지정된 제품이 하나도 없으면 추론 불가
+    if (Object.keys(제품축종).length === 0) { 거래처추론축종 = {}; return; }
+    
+    // 매출 세부내역 전체 조회
+    const snap = await getDocs(query(collection(window.fbdb,'전표_세부'), where('계정','==','매출'), orderBy('날짜','desc'), limit(10000)));
+    
+    // 회사별 축종 카운트
+    const counter = {};  // { 회사: { 양계: n, 양돈: n, 축우: n } }
+    snap.docs.forEach(d => {
+      const r = d.data();
+      const 회사 = r.회사; const 품명 = r.품명;
+      if (!회사 || !품명) return;
+      const sp = 제품축종[품명];
+      // 양계/양돈/축우만 카운트 (공통/미지정 제외)
+      if (sp !== '양계' && sp !== '양돈' && sp !== '축우') return;
+      counter[회사] = counter[회사] || {};
+      counter[회사][sp] = (counter[회사][sp] || 0) + 1;
+    });
+    
+    // 가장 많은 축종으로 결정
+    거래처추론축종 = {};
+    for (const [회사, counts] of Object.entries(counter)) {
+      let best = null, bestN = 0;
+      for (const [sp, n] of Object.entries(counts)) {
+        if (n > bestN) { best = sp; bestN = n; }
+      }
+      if (best) 거래처추론축종[회사] = best;
+    }
+    console.log(`거래처 축종 추론: ${Object.keys(거래처추론축종).length}개`);
+  } catch(e) {
+    console.warn('거래처 축종 추론 실패', e);
   }
 }
 
@@ -794,12 +964,14 @@ async function saveCategoryMapping(회사, 축종) {
 }
 window.saveCategoryMapping = saveCategoryMapping;
 
-// 회사명 기반 자동 분류 (수동 매핑 우선)
+// 회사명 기반 자동 분류 (수동 매핑 > 제품추론 > 회사명 순)
 function classifyCompany(name) {
   if (!name) return '미분류';
-  // 1) 수동 매핑이 있으면 그것을 우선
+  // 1) 수동 매핑 최우선
   if (축종매핑[name]) return 축종매핑[name];
-  // 2) 자동 분류
+  // 2) 제품 구매이력 기반 추론
+  if (거래처추론축종[name]) return 거래처추론축종[name];
+  // 3) 회사명 자동 분류
   const n = name.toLowerCase();
   if (n.includes('양견') || n.startsWith('양견-')) return '양견';
   if (n.includes('한우') || n.startsWith('ch-') || n.startsWith('cc-') ||
@@ -892,8 +1064,9 @@ async function searchInactive() {
   const { collection, query, getDocs, where, limit } = window.fbFuncs;
   
   try {
-    // 축종 매핑 재로드 (다른 사용자가 변경했을 수 있음)
+    // 축종 매핑 + 제품 구매 기반 추론 재로드
     await loadCategoryMap();
+    await inferCompanySpecies();
     
     // 잔액 컬렉션 (전체 기간 반영) + 거래처 마스터 병렬 조회
     const balColl = collection(window.fbdb, '잔액');
