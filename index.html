@@ -322,12 +322,21 @@ async function searchBalance() {
   
   try {
     // 방법: 전표_묶음에서 매출+수금 데이터 전체를 가져와 회사별로 집계
-    // (잔액 컬렉션에 의존하지 않아 항상 정확)
+    // 거래처 마스터에서 담당자(이름) 매핑
     const slipColl = collection(window.fbdb, '전표_묶음');
-    const [salesSnap, colSnap] = await Promise.all([
+    const custColl = collection(window.fbdb, '거래처');
+    const [salesSnap, colSnap, custSnap] = await Promise.all([
       getDocs(query(slipColl, where('계정','==','매출'), limit(10000))),
-      getDocs(query(slipColl, where('계정','==','수금'), limit(10000)))
+      getDocs(query(slipColl, where('계정','==','수금'), limit(10000))),
+      getDocs(query(custColl, limit(2000)))
     ]);
+    
+    // 거래처 마스터 → 회사명별 이름/전화 매핑
+    const custMap = new Map();
+    custSnap.docs.forEach(d => {
+      const r = d.data();
+      if (r.회사) custMap.set(r.회사, { 이름: r.이름 || '', 전화: r.전화1 || '' });
+    });
     
     // 회사별 집계
     const map = new Map();
@@ -350,10 +359,18 @@ async function searchBalance() {
     });
     
     let items = [...map.values()];
-    items.forEach(r => r.잔액 = r.총매출 - r.총수금);
+    items.forEach(r => {
+      r.잔액 = r.총매출 - r.총수금;
+      const info = custMap.get(r.회사) || {};
+      r.이름 = info.이름 || '';
+      r.전화 = info.전화 || '';
+    });
     
-    // 필터
-    if (q) items = items.filter(r => (r.회사||'').toLowerCase().includes(q));
+    // 필터 (회사명 + 담당자 이름 검색)
+    if (q) items = items.filter(r => 
+      (r.회사||'').toLowerCase().includes(q) ||
+      (r.이름||'').toLowerCase().includes(q)
+    );
     if (unpaidOnly) items = items.filter(r => r.잔액 > 0);
     
     // 잔액 큰 순 정렬
@@ -364,10 +381,11 @@ async function searchBalance() {
     const rows = items.slice(0, 300).map(r => {
       const cls = r.잔액 > 0 ? 'pos' : r.잔액 < 0 ? 'neg' : 'zero';
       const safeName = (r.회사||'').replace(/'/g,"\\'");
+      const 이름표시 = r.이름 ? `<span style="font-size:11px;color:var(--text3);margin-left:6px">(${r.이름})</span>` : '';
       return `<tr>
         <td onclick="goTxnByCompany('${safeName}')" style="cursor:pointer" title="거래내역 보기">
-          <strong style="color:var(--blue)">${r.회사||''}</strong>
-          <span style="font-size:10px;color:var(--text3);margin-left:6px">📋 거래내역</span>
+          <strong style="color:var(--blue)">${r.회사||''}</strong>${이름표시}
+          <span style="font-size:10px;color:var(--text3);margin-left:6px">📋</span>
         </td>
         <td class="num">${fmt억(r.총매출)}</td>
         <td class="num">${fmt억(r.총수금)}</td>
@@ -381,10 +399,10 @@ async function searchBalance() {
     
     document.getElementById('balance-result').innerHTML = `
       <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
-        ${items.length}개 거래처 · <span style="color:var(--blue)">거래처명</span>=거래내역 이동 · <span style="color:var(--amber)">잔액</span>=상세보기
+        ${items.length}개 거래처 · 회사명/담당자명 검색 · <span style="color:var(--blue)">거래처명</span>=거래내역 · <span style="color:var(--amber)">잔액</span>=상세보기
       </div>
       <div class="tbl-wrap"><table>
-        <thead><tr><th>거래처</th><th class="num">총 매출</th><th class="num">총 수금</th><th class="num">잔액 ▼</th><th class="hide-mobile">최종거래일</th></tr></thead>
+        <thead><tr><th>거래처 (담당자)</th><th class="num">총 매출</th><th class="num">총 수금</th><th class="num">잔액 ▼</th><th class="hide-mobile">최종거래일</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`;
   } catch(e) {
@@ -574,13 +592,21 @@ async function searchInfo() {
   const coll = collection(window.fbdb, '거래처');
   
   try {
-    const snap = await getDocs(query(coll, limit(700)));
+    const snap = await getDocs(query(coll, limit(2000)));
     let items = snap.docs.map(d => d.data());
-    if (q) items = items.filter(r => (r.회사||'').toLowerCase().includes(q));
+    
+    // 회사명 또는 담당자 이름으로 검색
+    if (q) items = items.filter(r => 
+      (r.회사||'').toLowerCase().includes(q) ||
+      (r.이름||'').toLowerCase().includes(q)
+    );
+    
+    // 회사명 오름차순 정렬
+    items.sort((a,b) => (a.회사||'').localeCompare(b.회사||''));
     
     if (!items.length) { empty('info-result'); return; }
     
-    const rows = items.slice(0, 200).map(r => `<tr>
+    const rows = items.slice(0, 300).map(r => `<tr>
       <td><strong>${r.회사||''}</strong></td>
       <td>${r.이름||''}</td>
       <td>${r.전화1||''}</td>
@@ -590,7 +616,7 @@ async function searchInfo() {
     </tr>`).join('');
     
     document.getElementById('info-result').innerHTML = `
-      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${items.length}개 거래처</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${items.length}개 거래처 · 회사명/담당자명 검색</div>
       <div class="tbl-wrap"><table>
         <thead><tr><th>거래처</th><th>담당자</th><th>전화</th><th class="hide-mobile">분류</th><th class="hide-mobile">주소</th><th>담당사원</th></tr></thead>
         <tbody>${rows}</tbody>
