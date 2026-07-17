@@ -162,7 +162,14 @@ tr:hover td{background:var(--bg3)}
         <button class="toggle-btn on" id="inact-60-btn" onclick="setInactivePeriod(60)">60일 이상</button>
         <button class="toggle-btn" id="inact-90-btn" onclick="setInactivePeriod(90)">90일 이상</button>
         <button class="toggle-btn" id="inact-120-btn" onclick="setInactivePeriod(120)">120일 이상</button>
-        <button class="toggle-btn" id="inact-unpaid-btn" onclick="toggleInactiveUnpaid()">미수금만</button>
+      </div>
+      <div class="search-row">
+        <button class="toggle-btn on" id="inact-cat-all" onclick="setCategory('all')">전체</button>
+        <button class="toggle-btn" id="inact-cat-양계" onclick="setCategory('양계')">양계</button>
+        <button class="toggle-btn" id="inact-cat-양돈" onclick="setCategory('양돈')">양돈</button>
+        <button class="toggle-btn" id="inact-cat-축우" onclick="setCategory('축우')">축우</button>
+        <button class="toggle-btn" id="inact-cat-동물병원/유통" onclick="setCategory('동물병원/유통')">동물병원</button>
+        <button class="toggle-btn" id="inact-cat-미분류" onclick="setCategory('미분류')">미분류</button>
       </div>
       <div id="inactive-result"></div>
     </div>
@@ -180,7 +187,7 @@ tr:hover td{background:var(--bg3)}
 <!-- Firebase SDK -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getFirestore, collection, query, where, getDocs, orderBy, limit, doc, getDoc } 
+import { getFirestore, collection, query, where, getDocs, orderBy, limit, doc, getDoc, setDoc, deleteDoc } 
   from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 // ⚠️ Firebase 설정 - 자기 값으로 교체
@@ -198,7 +205,7 @@ const db = getFirestore(app);
 
 // 전역으로 노출
 window.fbdb = db;
-window.fbFuncs = { collection, query, where, getDocs, orderBy, limit, doc, getDoc };
+window.fbFuncs = { collection, query, where, getDocs, orderBy, limit, doc, getDoc, setDoc, deleteDoc };
 
 // 초기화 완료 알림
 window.dispatchEvent(new Event('fbready'));
@@ -228,6 +235,7 @@ function doLogin() {
   document.getElementById('login-screen').classList.add('hide');
   document.getElementById('app').classList.add('show');
   document.getElementById('data-date').textContent = new Date().toLocaleDateString('ko-KR');
+  loadCategoryMap();  // 축종 매핑 로드 (백그라운드)
   searchStock();
 }
 window.doLogin = doLogin;
@@ -575,7 +583,122 @@ window.searchTxn = searchTxn;
 
 // ── 미거래 관리 ────────────────────────────────
 let inactiveDays = 60;
-let inactiveUnpaidOnly = false;
+let inactiveCategory = 'all';
+const MIN_BALANCE = 50000;  // 5만원 이하 제외
+
+// 축종 수동 매핑 캐시 (Firestore에서 로드)
+let 축종매핑 = {};  // { 회사명: '양계' | '양돈' | '축우' | ... }
+
+// 축종 매핑 Firestore에서 로드
+async function loadCategoryMap() {
+  const { collection, query, getDocs, limit } = window.fbFuncs;
+  try {
+    const snap = await getDocs(query(collection(window.fbdb, '축종매핑'), limit(2000)));
+    축종매핑 = {};
+    snap.docs.forEach(d => {
+      const r = d.data();
+      if (r.회사 && r.축종) 축종매핑[r.회사] = r.축종;
+    });
+    console.log(`축종매핑 로드: ${Object.keys(축종매핑).length}개`);
+  } catch(e) {
+    console.warn('축종매핑 로드 실패', e);
+  }
+}
+
+// 축종 매핑 저장 (개별)
+async function saveCategoryMapping(회사, 축종) {
+  const { doc, setDoc, deleteDoc } = window.fbFuncs;
+  const safeId = 회사.replace(/\//g,'_').replace(/\./g,'_');
+  const ref = doc(window.fbdb, '축종매핑', safeId);
+  try {
+    if (축종 === 'auto') {
+      // 자동으로 되돌리기 - 매핑 삭제
+      await deleteDoc(ref);
+      delete 축종매핑[회사];
+    } else {
+      await setDoc(ref, { 회사, 축종, 갱신일시: new Date().toISOString() });
+      축종매핑[회사] = 축종;
+    }
+    return true;
+  } catch(e) {
+    alert('저장 실패: ' + e.message);
+    console.error(e);
+    return false;
+  }
+}
+window.saveCategoryMapping = saveCategoryMapping;
+
+// 회사명 기반 자동 분류 (수동 매핑 우선)
+function classifyCompany(name) {
+  if (!name) return '미분류';
+  // 1) 수동 매핑이 있으면 그것을 우선
+  if (축종매핑[name]) return 축종매핑[name];
+  // 2) 자동 분류
+  const n = name.toLowerCase();
+  if (n.includes('한우') || n.startsWith('ch-') || n.startsWith('cc-') ||
+      n.includes('축우') || n.includes('젖소') || n.includes('한육우') || n.includes('목장')) return '축우';
+  if (n.includes('양계') || n.includes('계농') || n.includes('산란')) return '양계';
+  if (n.includes('양돈') || n.includes('돈장') || n.includes('돼지') || n.includes('축돈')) return '양돈';
+  if (n.includes('동물') || n.includes('수의') || n.includes('약품')) return '동물병원/유통';
+  return '미분류';
+}
+
+// 축종 편집 팝업 표시
+function editCategory(회사) {
+  const 현재 = 축종매핑[회사] || classifyCompany(회사);
+  const isManual = !!축종매핑[회사];
+  const options = ['양계','양돈','축우','동물병원/유통','미분류'];
+  const 색상map = {
+    '축우': '#7F77DD','양계': '#f0a050','양돈': '#e05555',
+    '동물병원/유통': '#36c4a0','미분류': 'var(--text3)'
+  };
+  
+  const html = `
+    <div id="cat-edit-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:400;display:flex;align-items:center;justify-content:center;padding:16px" onclick="closeCatEdit(event)">
+      <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:14px;padding:22px;max-width:400px;width:100%" onclick="event.stopPropagation()">
+        <div style="font-size:16px;font-weight:700;margin-bottom:4px">${회사}</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:18px">
+          현재: <span style="color:${색상map[현재]};font-weight:600">${현재}</span>
+          ${isManual ? '<span style="margin-left:6px;background:#28336b;color:#a5b7ff;padding:1px 6px;border-radius:8px;font-size:10px">수동</span>' : '<span style="margin-left:6px;color:var(--text3);font-size:10px">(자동 분류)</span>'}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          ${options.map(opt => `
+            <button onclick="doSetCategory('${회사.replace(/'/g,"\\'")}', '${opt}')" 
+              style="padding:10px;border-radius:8px;background:var(--bg3);border:1px solid var(--border2);color:${색상map[opt]};font-size:13px;font-weight:600;cursor:pointer;${현재===opt?'border-color:'+색상map[opt]+';background:'+색상map[opt]+'22':''}">
+              ${opt}
+            </button>
+          `).join('')}
+        </div>
+        <button onclick="doSetCategory('${회사.replace(/'/g,"\\'")}', 'auto')" 
+          style="width:100%;margin-top:12px;padding:10px;border-radius:8px;background:transparent;border:1px solid var(--border2);color:var(--text2);font-size:12px;cursor:pointer">
+          🔄 자동 분류로 되돌리기
+        </button>
+        <button onclick="closeCatEdit()" 
+          style="width:100%;margin-top:8px;padding:10px;border-radius:8px;background:var(--bg3);border:none;color:var(--text2);font-size:12px;cursor:pointer">
+          닫기
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+window.editCategory = editCategory;
+
+async function doSetCategory(회사, 축종) {
+  const ok = await saveCategoryMapping(회사, 축종);
+  if (ok) {
+    closeCatEdit();
+    searchInactive();  // 화면 재조회
+  }
+}
+window.doSetCategory = doSetCategory;
+
+function closeCatEdit(e) {
+  if (e && e.target.id !== 'cat-edit-modal') return;
+  const m = document.getElementById('cat-edit-modal');
+  if (m) m.remove();
+}
+window.closeCatEdit = closeCatEdit;
 
 function setInactivePeriod(days) {
   inactiveDays = days;
@@ -586,12 +709,15 @@ function setInactivePeriod(days) {
 }
 window.setInactivePeriod = setInactivePeriod;
 
-function toggleInactiveUnpaid() {
-  inactiveUnpaidOnly = !inactiveUnpaidOnly;
-  document.getElementById('inact-unpaid-btn').classList.toggle('on', inactiveUnpaidOnly);
+function setCategory(cat) {
+  inactiveCategory = cat;
+  ['all','양계','양돈','축우','동물병원/유통','미분류'].forEach(c => {
+    const btn = document.getElementById('inact-cat-'+c);
+    if (btn) btn.classList.toggle('on', c === cat);
+  });
   searchInactive();
 }
-window.toggleInactiveUnpaid = toggleInactiveUnpaid;
+window.setCategory = setCategory;
 
 async function searchInactive() {
   loading('inactive-result');
@@ -599,6 +725,9 @@ async function searchInactive() {
   const { collection, query, getDocs, where, limit } = window.fbFuncs;
   
   try {
+    // 축종 매핑 재로드 (다른 사용자가 변경했을 수 있음)
+    await loadCategoryMap();
+    
     // 잔액 컬렉션 (전체 기간 반영) + 거래처 마스터 병렬 조회
     const balColl = collection(window.fbdb, '잔액');
     const custColl = collection(window.fbdb, '거래처');
@@ -631,14 +760,20 @@ async function searchInactive() {
           이름: info.이름,
           전화: info.전화,
           담당사원: info.담당사원,
+          축종: classifyCompany(r.회사),
         };
       });
     
     // 기간 필터
     items = items.filter(r => r.미거래일수 >= inactiveDays);
     
-    // 미수금만 필터
-    if (inactiveUnpaidOnly) items = items.filter(r => r.잔액 > 0);
+    // 잔액 5만원 초과만 (5만원 이하 자동 제외)
+    items = items.filter(r => r.잔액 > MIN_BALANCE);
+    
+    // 축종 필터
+    if (inactiveCategory !== 'all') {
+      items = items.filter(r => r.축종 === inactiveCategory);
+    }
     
     // 미거래일수 큰 순 정렬
     items.sort((a,b) => b.미거래일수 - a.미거래일수);
@@ -646,13 +781,21 @@ async function searchInactive() {
     if (!items.length) { empty('inactive-result'); return; }
     
     // 통계 요약
-    const totalUnpaid = items.filter(r => r.잔액 > 0).reduce((s,r) => s + r.잔액, 0);
-    const unpaidCount = items.filter(r => r.잔액 > 0).length;
+    const totalUnpaid = items.reduce((s,r) => s + r.잔액, 0);
+    
+    // 축종별 집계
+    const catStats = {};
+    items.forEach(r => {
+      catStats[r.축종] = catStats[r.축종] || { 수: 0, 금액: 0 };
+      catStats[r.축종].수 += 1;
+      catStats[r.축종].금액 += r.잔액;
+    });
     
     const rows = items.slice(0, 300).map(r => {
       const cls = r.잔액 > 0 ? 'pos' : r.잔액 < 0 ? 'neg' : 'zero';
       const 이름표시 = r.이름 ? `<span style="font-size:11px;color:var(--text3);margin-left:6px">(${r.이름})</span>` : '';
       const safeName = (r.회사||'').replace(/'/g,"\\'");
+      const isManual = !!축종매핑[r.회사];
       
       // 미거래 일수에 따른 색상
       let dayColor = 'var(--text2)';
@@ -660,10 +803,25 @@ async function searchInactive() {
       else if (r.미거래일수 >= 90) dayColor = 'var(--amber)';
       else if (r.미거래일수 >= 60) dayColor = '#f0d050';
       
+      // 축종별 배지 색상
+      const 축종Color = {
+        '축우':   '#7F77DD',
+        '양계':   '#f0a050',
+        '양돈':   '#e05555',
+        '동물병원/유통': '#36c4a0',
+        '미분류': 'var(--text3)',
+      }[r.축종] || 'var(--text3)';
+      
       return `<tr>
         <td onclick="goTxnByCompany('${safeName}')" style="cursor:pointer" title="거래내역 보기">
           <strong style="color:var(--blue)">${r.회사||''}</strong>${이름표시}
           <span style="font-size:10px;color:var(--text3);margin-left:6px">📋</span>
+        </td>
+        <td>
+          <span onclick="editCategory('${safeName}')" title="클릭하여 축종 변경"
+            style="cursor:pointer;font-size:10px;padding:2px 6px;border-radius:8px;background:${축종Color}33;color:${축종Color};font-weight:600;border:1px solid ${isManual?축종Color:'transparent'}">
+            ${r.축종}${isManual?' ✎':''}
+          </span>
         </td>
         <td class="num" style="color:${dayColor};font-weight:600">${r.미거래일수}일</td>
         <td style="font-size:11px;color:var(--text3)">${r.최종매출일||''}</td>
@@ -673,32 +831,44 @@ async function searchInactive() {
       </tr>`;
     }).join('');
     
+    // 축종별 요약 표시
+    const catBadges = Object.entries(catStats)
+      .sort((a,b) => b[1].금액 - a[1].금액)
+      .map(([cat, s]) => {
+        const 축종Color = {
+          '축우':   '#7F77DD',
+          '양계':   '#f0a050',
+          '양돈':   '#e05555',
+          '동물병원/유통': '#36c4a0',
+          '미분류': 'var(--text3)',
+        }[cat] || 'var(--text3)';
+        return `<span style="display:inline-block;margin-right:8px;padding:3px 10px;border-radius:12px;background:${축종Color}22;color:${축종Color};font-size:11px;font-weight:600">${cat} ${s.수}곳 · ${fmt억(s.금액)}</span>`;
+      }).join('');
+    
     document.getElementById('inactive-result').innerHTML = `
       <div class="kpi-grid" style="margin-bottom:14px">
         <div class="kpi a">
-          <div class="kpi-lbl">${inactiveDays}일 이상 미거래</div>
+          <div class="kpi-lbl">${inactiveDays}일 이상 미거래 (5만원 초과)</div>
           <div class="kpi-val">${items.length}<span style="font-size:14px"> 개사</span></div>
-          <div class="kpi-sub">전체 거래처 중</div>
+          <div class="kpi-sub">${inactiveCategory === 'all' ? '전체' : inactiveCategory}</div>
         </div>
-        <div class="kpi p">
-          <div class="kpi-lbl">미수금 있는 곳</div>
-          <div class="kpi-val">${unpaidCount}<span style="font-size:14px"> 개사</span></div>
-          <div class="kpi-sub">잔액 > 0</div>
-        </div>
-        <div class="kpi b" style="grid-column:span 2">
+        <div class="kpi b" style="grid-column:span 3">
           <div class="kpi-lbl">회수 필요 총액</div>
           <div class="kpi-val" style="color:var(--amber)">${fmtNum(totalUnpaid)}<span style="font-size:14px"> 원</span></div>
-          <div class="kpi-sub">${fmt억(totalUnpaid)} · 미수금 합계</div>
+          <div class="kpi-sub">${fmt억(totalUnpaid)}</div>
         </div>
       </div>
+      <div style="margin-bottom:12px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px">
+        ${catBadges || '<span style="color:var(--text3);font-size:11px">데이터 없음</span>'}
+      </div>
       <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
-        ${items.length}개 거래처 · 미거래일수 오래된 순 · 
+        ${items.length}개 거래처 · 5만원 이하 자동 제외 · 미거래일수 오래된 순 · 
         <span style="color:#f0d050">60일↑</span> · 
         <span style="color:var(--amber)">90일↑</span> · 
         <span style="color:var(--red)">120일↑</span>
       </div>
       <div class="tbl-wrap"><table>
-        <thead><tr><th>거래처 (담당자)</th><th class="num">미거래 ▼</th><th>최종거래</th><th class="num">잔액</th><th class="hide-mobile">전화</th><th class="hide-mobile">담당사원</th></tr></thead>
+        <thead><tr><th>거래처 (담당자)</th><th>축종</th><th class="num">미거래 ▼</th><th>최종거래</th><th class="num">잔액</th><th class="hide-mobile">전화</th><th class="hide-mobile">담당사원</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`;
   } catch(e) {
