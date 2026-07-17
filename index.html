@@ -326,7 +326,7 @@ function toggleStockOnly() {
 }
 window.toggleStockOnly = toggleStockOnly;
 
-// ── 거래처 잔액 (실시간 계산) ──────────────────────
+// ── 거래처 잔액 (잔액 컬렉션 사용 - 전체 기간 반영) ─
 async function searchBalance() {
   const q = document.getElementById('bal-q').value.trim().toLowerCase();
   loading('balance-result');
@@ -334,13 +334,11 @@ async function searchBalance() {
   const { collection, query, getDocs, orderBy, limit, where } = window.fbFuncs;
   
   try {
-    // 방법: 전표_묶음에서 매출+수금 데이터 전체를 가져와 회사별로 집계
-    // 거래처 마스터에서 담당자(이름) 매핑
-    const slipColl = collection(window.fbdb, '전표_묶음');
+    // 잔액 컬렉션 (미리 전체 기간으로 계산되어 저장됨) + 거래처 마스터 병렬 조회
+    const balColl = collection(window.fbdb, '잔액');
     const custColl = collection(window.fbdb, '거래처');
-    const [salesSnap, colSnap, custSnap] = await Promise.all([
-      getDocs(query(slipColl, where('계정','==','매출'), limit(10000))),
-      getDocs(query(slipColl, where('계정','==','수금'), limit(10000))),
+    const [balSnap, custSnap] = await Promise.all([
+      getDocs(query(balColl, orderBy('잔액', 'desc'), limit(1000))),
       getDocs(query(custColl, limit(2000)))
     ]);
     
@@ -351,32 +349,14 @@ async function searchBalance() {
       if (r.회사) custMap.set(r.회사, { 이름: r.이름 || '', 전화: r.전화1 || '' });
     });
     
-    // 회사별 집계
-    const map = new Map();
-    salesSnap.docs.forEach(d => {
+    let items = balSnap.docs.map(d => {
       const r = d.data();
-      const c = r.회사 || '';
-      if (!c) return;
-      const cur = map.get(c) || { 회사:c, 총매출:0, 총수금:0, 최종매출일:'' };
-      cur.총매출 += (+r.합계||0);
-      if ((r.날짜||'') > cur.최종매출일) cur.최종매출일 = r.날짜 || '';
-      map.set(c, cur);
-    });
-    colSnap.docs.forEach(d => {
-      const r = d.data();
-      const c = r.회사 || '';
-      if (!c) return;
-      const cur = map.get(c) || { 회사:c, 총매출:0, 총수금:0, 최종매출일:'' };
-      cur.총수금 += (+r.입금액||0);
-      map.set(c, cur);
-    });
-    
-    let items = [...map.values()];
-    items.forEach(r => {
-      r.잔액 = r.총매출 - r.총수금;
       const info = custMap.get(r.회사) || {};
-      r.이름 = info.이름 || '';
-      r.전화 = info.전화 || '';
+      return {
+        ...r,
+        이름: info.이름,
+        전화: info.전화,
+      };
     });
     
     // 필터 (회사명 + 담당자 이름 검색)
@@ -385,9 +365,6 @@ async function searchBalance() {
       (r.이름||'').toLowerCase().includes(q)
     );
     if (unpaidOnly) items = items.filter(r => r.잔액 > 0);
-    
-    // 잔액 큰 순 정렬
-    items.sort((a,b) => b.잔액 - a.잔액);
     
     if (!items.length) { empty('balance-result'); return; }
     
@@ -622,12 +599,11 @@ async function searchInactive() {
   const { collection, query, getDocs, where, limit } = window.fbFuncs;
   
   try {
-    // 전표 매출/수금 데이터 + 거래처 마스터 병렬 조회
-    const slipColl = collection(window.fbdb, '전표_묶음');
+    // 잔액 컬렉션 (전체 기간 반영) + 거래처 마스터 병렬 조회
+    const balColl = collection(window.fbdb, '잔액');
     const custColl = collection(window.fbdb, '거래처');
-    const [salesSnap, colSnap, custSnap] = await Promise.all([
-      getDocs(query(slipColl, where('계정','==','매출'), limit(10000))),
-      getDocs(query(slipColl, where('계정','==','수금'), limit(10000))),
+    const [balSnap, custSnap] = await Promise.all([
+      getDocs(query(balColl, limit(2000))),
       getDocs(query(custColl, limit(2000)))
     ]);
     
@@ -638,31 +614,12 @@ async function searchInactive() {
       if (r.회사) custMap.set(r.회사, { 이름: r.이름 || '', 전화: r.전화1 || '', 담당사원: r.담당사원 || '' });
     });
     
-    // 회사별 집계
-    const map = new Map();
-    salesSnap.docs.forEach(d => {
-      const r = d.data();
-      const c = r.회사 || '';
-      if (!c) return;
-      const cur = map.get(c) || { 회사:c, 총매출:0, 총수금:0, 최종매출일:'' };
-      cur.총매출 += (+r.합계||0);
-      if ((r.날짜||'') > cur.최종매출일) cur.최종매출일 = r.날짜 || '';
-      map.set(c, cur);
-    });
-    colSnap.docs.forEach(d => {
-      const r = d.data();
-      const c = r.회사 || '';
-      if (!c) return;
-      const cur = map.get(c) || { 회사:c, 총매출:0, 총수금:0, 최종매출일:'' };
-      cur.총수금 += (+r.입금액||0);
-      map.set(c, cur);
-    });
-    
     // 오늘 기준 미거래 일수 계산
     const today = new Date();
     today.setHours(0,0,0,0);
     
-    let items = [...map.values()]
+    let items = balSnap.docs
+      .map(d => d.data())
       .filter(r => r.최종매출일)  // 매출 이력 있는 것만
       .map(r => {
         const lastDate = new Date(r.최종매출일);
@@ -670,7 +627,6 @@ async function searchInactive() {
         const info = custMap.get(r.회사) || {};
         return {
           ...r,
-          잔액: r.총매출 - r.총수금,
           미거래일수: diffDays,
           이름: info.이름,
           전화: info.전화,
