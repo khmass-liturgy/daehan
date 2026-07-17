@@ -117,6 +117,7 @@ tr:hover td{background:var(--bg3)}
     <div class="nav-tab active" onclick="showTab('stock')">재고 조회</div>
     <div class="nav-tab" onclick="showTab('balance')">거래처 잔액</div>
     <div class="nav-tab" onclick="showTab('txn')">거래내역</div>
+    <div class="nav-tab" onclick="showTab('inactive')">미거래 관리</div>
     <div class="nav-tab" onclick="showTab('info')">거래처 정보</div>
   </nav>
 
@@ -153,6 +154,17 @@ tr:hover td{background:var(--bg3)}
         <button class="search-btn" onclick="searchTxn()">검색</button>
       </div>
       <div id="txn-result"></div>
+    </div>
+
+    <div id="tab-inactive" style="display:none">
+      <div class="search-row">
+        <button class="toggle-btn" id="inact-30-btn" onclick="setInactivePeriod(30)">30일 이상</button>
+        <button class="toggle-btn on" id="inact-60-btn" onclick="setInactivePeriod(60)">60일 이상</button>
+        <button class="toggle-btn" id="inact-90-btn" onclick="setInactivePeriod(90)">90일 이상</button>
+        <button class="toggle-btn" id="inact-120-btn" onclick="setInactivePeriod(120)">120일 이상</button>
+        <button class="toggle-btn" id="inact-unpaid-btn" onclick="toggleInactiveUnpaid()">미수금만</button>
+      </div>
+      <div id="inactive-result"></div>
     </div>
 
     <div id="tab-info" style="display:none">
@@ -233,12 +245,13 @@ function empty(id) { document.getElementById(id).innerHTML = '<div class="empty"
 
 // ── 탭 ───────────────────────────────────────────
 function showTab(name) {
-  ['stock','balance','txn','info'].forEach(t => {
+  ['stock','balance','txn','inactive','info'].forEach(t => {
     document.getElementById('tab-'+t).style.display = t === name ? '' : 'none';
   });
   document.querySelectorAll('.nav-tab').forEach((el,i) => {
-    el.classList.toggle('active', ['stock','balance','txn','info'][i] === name);
+    el.classList.toggle('active', ['stock','balance','txn','inactive','info'][i] === name);
   });
+  if (name === 'inactive' && !document.querySelector('#inactive-result table')) searchInactive();
 }
 window.showTab = showTab;
 
@@ -582,6 +595,162 @@ async function searchTxn() {
   }
 }
 window.searchTxn = searchTxn;
+
+// ── 미거래 관리 ────────────────────────────────
+let inactiveDays = 60;
+let inactiveUnpaidOnly = false;
+
+function setInactivePeriod(days) {
+  inactiveDays = days;
+  ['30','60','90','120'].forEach(d => {
+    document.getElementById('inact-'+d+'-btn').classList.toggle('on', +d === days);
+  });
+  searchInactive();
+}
+window.setInactivePeriod = setInactivePeriod;
+
+function toggleInactiveUnpaid() {
+  inactiveUnpaidOnly = !inactiveUnpaidOnly;
+  document.getElementById('inact-unpaid-btn').classList.toggle('on', inactiveUnpaidOnly);
+  searchInactive();
+}
+window.toggleInactiveUnpaid = toggleInactiveUnpaid;
+
+async function searchInactive() {
+  loading('inactive-result');
+  
+  const { collection, query, getDocs, where, limit } = window.fbFuncs;
+  
+  try {
+    // 전표 매출/수금 데이터 + 거래처 마스터 병렬 조회
+    const slipColl = collection(window.fbdb, '전표_묶음');
+    const custColl = collection(window.fbdb, '거래처');
+    const [salesSnap, colSnap, custSnap] = await Promise.all([
+      getDocs(query(slipColl, where('계정','==','매출'), limit(10000))),
+      getDocs(query(slipColl, where('계정','==','수금'), limit(10000))),
+      getDocs(query(custColl, limit(2000)))
+    ]);
+    
+    // 거래처 정보 맵
+    const custMap = new Map();
+    custSnap.docs.forEach(d => {
+      const r = d.data();
+      if (r.회사) custMap.set(r.회사, { 이름: r.이름 || '', 전화: r.전화1 || '', 담당사원: r.담당사원 || '' });
+    });
+    
+    // 회사별 집계
+    const map = new Map();
+    salesSnap.docs.forEach(d => {
+      const r = d.data();
+      const c = r.회사 || '';
+      if (!c) return;
+      const cur = map.get(c) || { 회사:c, 총매출:0, 총수금:0, 최종매출일:'' };
+      cur.총매출 += (+r.합계||0);
+      if ((r.날짜||'') > cur.최종매출일) cur.최종매출일 = r.날짜 || '';
+      map.set(c, cur);
+    });
+    colSnap.docs.forEach(d => {
+      const r = d.data();
+      const c = r.회사 || '';
+      if (!c) return;
+      const cur = map.get(c) || { 회사:c, 총매출:0, 총수금:0, 최종매출일:'' };
+      cur.총수금 += (+r.입금액||0);
+      map.set(c, cur);
+    });
+    
+    // 오늘 기준 미거래 일수 계산
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    
+    let items = [...map.values()]
+      .filter(r => r.최종매출일)  // 매출 이력 있는 것만
+      .map(r => {
+        const lastDate = new Date(r.최종매출일);
+        const diffDays = Math.floor((today - lastDate) / (1000*60*60*24));
+        const info = custMap.get(r.회사) || {};
+        return {
+          ...r,
+          잔액: r.총매출 - r.총수금,
+          미거래일수: diffDays,
+          이름: info.이름,
+          전화: info.전화,
+          담당사원: info.담당사원,
+        };
+      });
+    
+    // 기간 필터
+    items = items.filter(r => r.미거래일수 >= inactiveDays);
+    
+    // 미수금만 필터
+    if (inactiveUnpaidOnly) items = items.filter(r => r.잔액 > 0);
+    
+    // 미거래일수 큰 순 정렬
+    items.sort((a,b) => b.미거래일수 - a.미거래일수);
+    
+    if (!items.length) { empty('inactive-result'); return; }
+    
+    // 통계 요약
+    const totalUnpaid = items.filter(r => r.잔액 > 0).reduce((s,r) => s + r.잔액, 0);
+    const unpaidCount = items.filter(r => r.잔액 > 0).length;
+    
+    const rows = items.slice(0, 300).map(r => {
+      const cls = r.잔액 > 0 ? 'pos' : r.잔액 < 0 ? 'neg' : 'zero';
+      const 이름표시 = r.이름 ? `<span style="font-size:11px;color:var(--text3);margin-left:6px">(${r.이름})</span>` : '';
+      const safeName = (r.회사||'').replace(/'/g,"\\'");
+      
+      // 미거래 일수에 따른 색상
+      let dayColor = 'var(--text2)';
+      if (r.미거래일수 >= 120) dayColor = 'var(--red)';
+      else if (r.미거래일수 >= 90) dayColor = 'var(--amber)';
+      else if (r.미거래일수 >= 60) dayColor = '#f0d050';
+      
+      return `<tr>
+        <td onclick="goTxnByCompany('${safeName}')" style="cursor:pointer" title="거래내역 보기">
+          <strong style="color:var(--blue)">${r.회사||''}</strong>${이름표시}
+          <span style="font-size:10px;color:var(--text3);margin-left:6px">📋</span>
+        </td>
+        <td class="num" style="color:${dayColor};font-weight:600">${r.미거래일수}일</td>
+        <td style="font-size:11px;color:var(--text3)">${r.최종매출일||''}</td>
+        <td class="num ${cls}"><strong>${fmtNum(r.잔액)}</strong></td>
+        <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.전화||''}</td>
+        <td class="hide-mobile">${r.담당사원||''}</td>
+      </tr>`;
+    }).join('');
+    
+    document.getElementById('inactive-result').innerHTML = `
+      <div class="kpi-grid" style="margin-bottom:14px">
+        <div class="kpi a">
+          <div class="kpi-lbl">${inactiveDays}일 이상 미거래</div>
+          <div class="kpi-val">${items.length}<span style="font-size:14px"> 개사</span></div>
+          <div class="kpi-sub">전체 거래처 중</div>
+        </div>
+        <div class="kpi p">
+          <div class="kpi-lbl">미수금 있는 곳</div>
+          <div class="kpi-val">${unpaidCount}<span style="font-size:14px"> 개사</span></div>
+          <div class="kpi-sub">잔액 > 0</div>
+        </div>
+        <div class="kpi b" style="grid-column:span 2">
+          <div class="kpi-lbl">회수 필요 총액</div>
+          <div class="kpi-val" style="color:var(--amber)">${fmtNum(totalUnpaid)}<span style="font-size:14px"> 원</span></div>
+          <div class="kpi-sub">${fmt억(totalUnpaid)} · 미수금 합계</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
+        ${items.length}개 거래처 · 미거래일수 오래된 순 · 
+        <span style="color:#f0d050">60일↑</span> · 
+        <span style="color:var(--amber)">90일↑</span> · 
+        <span style="color:var(--red)">120일↑</span>
+      </div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>거래처 (담당자)</th><th class="num">미거래 ▼</th><th>최종거래</th><th class="num">잔액</th><th class="hide-mobile">전화</th><th class="hide-mobile">담당사원</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+  } catch(e) {
+    document.getElementById('inactive-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+    console.error(e);
+  }
+}
+window.searchInactive = searchInactive;
 
 // ── 거래처 정보 ────────────────────────────────
 async function searchInfo() {
