@@ -325,8 +325,8 @@ async function searchBalance() {
     // (잔액 컬렉션에 의존하지 않아 항상 정확)
     const slipColl = collection(window.fbdb, '전표_묶음');
     const [salesSnap, colSnap] = await Promise.all([
-      getDocs(query(slipColl, where('계정','==','매출'), limit(20000))),
-      getDocs(query(slipColl, where('계정','==','수금'), limit(20000)))
+      getDocs(query(slipColl, where('계정','==','매출'), limit(10000))),
+      getDocs(query(slipColl, where('계정','==','수금'), limit(10000)))
     ]);
     
     // 회사별 집계
