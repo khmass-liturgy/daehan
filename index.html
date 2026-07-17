@@ -468,27 +468,48 @@ async function searchTxn() {
   const coll = collection(window.fbdb, '전표_세부');
   
   try {
-    let constraints = [];
-    if (company) constraints.push(where('회사', '==', company));
-    if (acct)    constraints.push(where('계정', '==', acct));
-    constraints.push(orderBy('날짜', 'desc'));
-    constraints.push(limit(500));
+    let items = [];
+    let matchedCompanies = new Set();
     
-    const snap = await getDocs(query(coll, ...constraints));
-    let items = snap.docs.map(d => d.data());
+    if (company) {
+      // 회사명 부분 일치 검색 (Firestore는 == 만 되므로 클라이언트 필터링)
+      // 1단계: 계정 필터가 있으면 그 조건으로만 조회, 없으면 전체 최근 순
+      let constraints = [];
+      if (acct) constraints.push(where('계정', '==', acct));
+      constraints.push(orderBy('날짜', 'desc'));
+      constraints.push(limit(5000));
+      
+      const snap = await getDocs(query(coll, ...constraints));
+      const allDocs = snap.docs.map(d => d.data());
+      
+      // 회사명 부분 일치 필터
+      const kw = company.toLowerCase();
+      items = allDocs.filter(r => (r.회사||'').toLowerCase().includes(kw));
+      items.forEach(r => matchedCompanies.add(r.회사));
+    } else {
+      // 회사 조건 없이 계정만 조회
+      let constraints = [];
+      if (acct) constraints.push(where('계정', '==', acct));
+      constraints.push(orderBy('날짜', 'desc'));
+      constraints.push(limit(500));
+      const snap = await getDocs(query(coll, ...constraints));
+      items = snap.docs.map(d => d.data());
+    }
     
+    // 품명 필터
     if (product) items = items.filter(r => (r.품명||'').toLowerCase().includes(product));
     
     if (!items.length) { empty('txn-result'); return; }
     
-    // 회사별 잔액 계산 (회사 1곳 필터일 때만)
+    // 회사별 잔액 계산 (매칭된 회사가 정확히 1곳일 때만)
     let showBalance = false;
     let balanceMap = {};
-    if (company) {
-      // 해당 회사의 모든 매출/수금 헤더를 가져와 시간순 누계
+    let targetCompany = '';
+    
+    if (matchedCompanies.size === 1) {
+      targetCompany = [...matchedCompanies][0];
       const headColl = collection(window.fbdb, '전표_묶음');
-      const hsnap = await getDocs(query(headColl, where('회사','==',company), orderBy('날짜','asc'), limit(5000)));
-      // JS에서 날짜+전표번호로 재정렬 (같은 날 여러 전표 안정 정렬)
+      const hsnap = await getDocs(query(headColl, where('회사','==',targetCompany), orderBy('날짜','asc'), limit(5000)));
       const headers = hsnap.docs.map(d => d.data());
       headers.sort((a,b) => {
         if (a.날짜 !== b.날짜) return a.날짜.localeCompare(b.날짜);
@@ -503,7 +524,7 @@ async function searchTxn() {
       showBalance = true;
     }
     
-    const rows = items.map(r => {
+    const rows = items.slice(0, 500).map(r => {
       const tagCls = `tag-${r.계정}`;
       const bal = balanceMap[r.전표번호];
       const balCell = showBalance 
@@ -523,14 +544,22 @@ async function searchTxn() {
     
     const balHeader = showBalance ? '<th class="num">잔액</th>' : '';
     
+    // 안내 메시지
+    let infoMsg = `${items.length}건`;
+    if (matchedCompanies.size > 1) {
+      infoMsg += ` · ${matchedCompanies.size}개 거래처 매칭 (정확한 이름 입력시 잔액 표시)`;
+    } else if (targetCompany && targetCompany !== company) {
+      infoMsg += ` · 매칭된 거래처: ${targetCompany}`;
+    }
+    
     document.getElementById('txn-result').innerHTML = `
-      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${items.length}건</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${infoMsg}</div>
       <div class="tbl-wrap"><table>
         <thead><tr><th>날짜</th><th>거래처</th><th>구분</th><th>품명</th><th class="num hide-mobile">수량</th><th class="num hide-mobile">단가</th><th class="num">금액</th>${balHeader}</tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`;
   } catch(e) {
-    document.getElementById('txn-result').innerHTML = `<div class="empty">오류: ${e.message}<br>인덱스 생성이 필요할 수 있습니다. 콘솔을 확인하세요.</div>`;
+    document.getElementById('txn-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
     console.error(e);
   }
 }
