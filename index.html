@@ -124,10 +124,27 @@ tr:hover td{background:var(--bg3)}
   <main>
     <div id="tab-stock">
       <div class="search-row">
+        <button class="toggle-btn on" id="stock-mode-all" onclick="setStockMode('all')">전체 재고</button>
+        <button class="toggle-btn" id="stock-mode-mfg" onclick="setStockMode('mfg')">제조사별</button>
+        <button class="toggle-btn" id="stock-mode-cust" onclick="setStockMode('cust')">거래처 구매내역</button>
+      </div>
+      
+      <!-- 전체/제조사 모드 -->
+      <div id="stock-search-normal" class="search-row">
         <input class="search-input" id="stock-q" placeholder="품명 또는 제조사 검색..." onkeydown="if(event.key==='Enter')searchStock()">
+        <select class="filter" id="stock-mfg" onchange="searchStock()" style="display:none">
+          <option value="">제조사 선택</option>
+        </select>
         <button class="toggle-btn" id="stock-only-btn" onclick="toggleStockOnly()">재고있음만</button>
         <button class="search-btn" onclick="searchStock()">검색</button>
       </div>
+      
+      <!-- 거래처 구매내역 모드 -->
+      <div id="stock-search-cust" class="search-row" style="display:none">
+        <input class="search-input" id="stock-cust-q" placeholder="거래처명 입력 (예: 유월농장)" onkeydown="if(event.key==='Enter')searchCustProducts()">
+        <button class="search-btn" onclick="searchCustProducts()">구매내역 조회</button>
+      </div>
+      
       <div id="stock-result"></div>
     </div>
 
@@ -265,15 +282,69 @@ function showTab(name) {
 window.showTab = showTab;
 
 // ── 재고 조회 ─────────────────────────────────────
+let stockMode = 'all';
+let mfgListLoaded = false;
+
+function setStockMode(mode) {
+  stockMode = mode;
+  ['all','mfg','cust'].forEach(m => {
+    document.getElementById('stock-mode-'+m).classList.toggle('on', m === mode);
+  });
+  
+  const normalRow = document.getElementById('stock-search-normal');
+  const custRow = document.getElementById('stock-search-cust');
+  const mfgSelect = document.getElementById('stock-mfg');
+  const qInput = document.getElementById('stock-q');
+  
+  if (mode === 'cust') {
+    normalRow.style.display = 'none';
+    custRow.style.display = 'flex';
+    document.getElementById('stock-result').innerHTML = '<div class="empty">거래처명을 입력하고 조회하세요</div>';
+  } else {
+    normalRow.style.display = 'flex';
+    custRow.style.display = 'none';
+    if (mode === 'mfg') {
+      mfgSelect.style.display = '';
+      qInput.placeholder = '품명 검색 (제조사 선택과 함께)';
+      loadMfgList();
+    } else {
+      mfgSelect.style.display = 'none';
+      mfgSelect.value = '';
+      qInput.placeholder = '품명 또는 제조사 검색...';
+    }
+    searchStock();
+  }
+}
+window.setStockMode = setStockMode;
+
+// 제조사 목록 로드 (드롭다운 채우기)
+async function loadMfgList() {
+  if (mfgListLoaded) return;
+  const { collection, query, getDocs, limit } = window.fbFuncs;
+  try {
+    const snap = await getDocs(query(collection(window.fbdb, '제품'), limit(1200)));
+    const mfgs = new Set();
+    snap.docs.forEach(d => {
+      const m = d.data().대분류;
+      if (m) mfgs.add(m);
+    });
+    const sorted = [...mfgs].sort((a,b) => a.localeCompare(b));
+    const select = document.getElementById('stock-mfg');
+    select.innerHTML = '<option value="">제조사 전체</option>' + 
+      sorted.map(m => `<option value="${m}">${m}</option>`).join('');
+    mfgListLoaded = true;
+  } catch(e) { console.warn('제조사 목록 로드 실패', e); }
+}
+
 async function searchStock() {
   const q = document.getElementById('stock-q').value.trim().toLowerCase();
+  const mfg = document.getElementById('stock-mfg').value;
   loading('stock-result');
   
   const { collection, query, getDocs, where, limit } = window.fbFuncs;
   const coll = collection(window.fbdb, '제품');
   
   try {
-    // 재고있음 필터 (전체 조회 후 클라이언트 정렬)
     let snap;
     if (stockOnly) {
       snap = await getDocs(query(coll, where('현재재고', '>', 0), limit(1200)));
@@ -283,7 +354,12 @@ async function searchStock() {
     
     let items = snap.docs.map(d => d.data());
     
-    // 클라이언트 필터링 (부분 일치)
+    // 제조사 필터 (제조사별 모드)
+    if (mfg) {
+      items = items.filter(r => r.대분류 === mfg);
+    }
+    
+    // 품명 검색
     if (q) {
       items = items.filter(r => 
         (r.품명||'').toLowerCase().includes(q) || 
@@ -292,12 +368,11 @@ async function searchStock() {
       );
     }
     
-    // 재고 많은 순 정렬 (재고 있는 것 우선, 그 안에서 수량 내림차순)
+    // 재고 많은 순 정렬
     items.sort((a, b) => {
       const aStock = +a.현재재고 || 0;
       const bStock = +b.현재재고 || 0;
       if (aStock !== bStock) return bStock - aStock;
-      // 재고가 같으면 품명 오름차순
       return (a.품명||'').localeCompare(b.품명||'');
     });
     
@@ -316,8 +391,9 @@ async function searchStock() {
       </tr>`;
     }).join('');
     
+    const 제목 = mfg ? `[${mfg}] ` : '';
     document.getElementById('stock-result').innerHTML = `
-      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${items.length}개 품목 ${items.length>300?'(재고 많은 300개 표시)':''} · 재고 많은 순</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${제목}${items.length}개 품목 ${items.length>300?'(재고 많은 300개 표시)':''} · 재고 많은 순</div>
       <div class="tbl-wrap"><table>
         <thead><tr><th>제조사</th><th>품명</th><th>단위</th><th class="num">현재재고 ▼</th><th class="num hide-mobile">소매단가</th><th class="num hide-mobile">구매단가</th><th class="hide-mobile">최근판매처</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -327,6 +403,94 @@ async function searchStock() {
   }
 }
 window.searchStock = searchStock;
+
+// 거래처 구매내역 조회
+async function searchCustProducts() {
+  const company = document.getElementById('stock-cust-q').value.trim();
+  if (!company) {
+    document.getElementById('stock-result').innerHTML = '<div class="empty">거래처명을 입력하세요</div>';
+    return;
+  }
+  loading('stock-result');
+  
+  const { collection, query, getDocs, where, orderBy, limit } = window.fbFuncs;
+  const coll = collection(window.fbdb, '전표_세부');
+  
+  try {
+    // 해당 거래처의 매출(=거래처가 구매) 세부 내역
+    const snap = await getDocs(query(coll, where('회사','==',company), where('계정','==','매출'), orderBy('날짜','desc'), limit(3000)));
+    let details = snap.docs.map(d => d.data());
+    
+    // 회사명 부분일치 재시도 (정확 매칭 실패 시)
+    if (!details.length) {
+      const allSnap = await getDocs(query(coll, where('계정','==','매출'), orderBy('날짜','desc'), limit(5000)));
+      const kw = company.toLowerCase();
+      details = allSnap.docs.map(d => d.data()).filter(r => (r.회사||'').toLowerCase().includes(kw));
+    }
+    
+    if (!details.length) { 
+      document.getElementById('stock-result').innerHTML = `<div class="empty">${company}의 구매 내역이 없습니다</div>`;
+      return; 
+    }
+    
+    const 실제거래처 = details[0].회사;
+    
+    // 품명별 집계
+    const prodMap = new Map();
+    details.forEach(r => {
+      const key = r.품명 || '(미상)';
+      const cur = prodMap.get(key) || { 품명:key, 대분류:r.대분류||'', 구매횟수:0, 총수량:0, 최근구매:'', 최근단가:0 };
+      cur.구매횟수 += 1;
+      cur.총수량 += (+r.수량||0);
+      if ((r.날짜||'') > cur.최근구매) {
+        cur.최근구매 = r.날짜 || '';
+        cur.최근단가 = +r.단가 || 0;
+      }
+      prodMap.set(key, cur);
+    });
+    
+    let items = [...prodMap.values()];
+    items.sort((a,b) => b.구매횟수 - a.구매횟수);
+    
+    const 총품목 = items.length;
+    const 총구매횟수 = details.length;
+    
+    const rows = items.slice(0, 300).map(r => `<tr>
+      <td>${r.대분류||''}</td>
+      <td><strong>${r.품명||''}</strong></td>
+      <td class="num">${r.구매횟수}회</td>
+      <td class="num">${fmtNum(r.총수량)}</td>
+      <td class="num hide-mobile">${fmtNum(r.최근단가)}</td>
+      <td style="font-size:11px;color:var(--text3)">${r.최근구매||''}</td>
+    </tr>`).join('');
+    
+    document.getElementById('stock-result').innerHTML = `
+      <div class="kpi-grid" style="margin-bottom:14px">
+        <div class="kpi b" style="grid-column:span 2">
+          <div class="kpi-lbl">거래처</div>
+          <div class="kpi-val" style="font-size:18px">${실제거래처}</div>
+          <div class="kpi-sub">구매 제품 분석</div>
+        </div>
+        <div class="kpi g">
+          <div class="kpi-lbl">구매 품목 수</div>
+          <div class="kpi-val">${총품목}<span style="font-size:14px"> 종</span></div>
+        </div>
+        <div class="kpi p">
+          <div class="kpi-lbl">총 구매 횟수</div>
+          <div class="kpi-val">${총구매횟수}<span style="font-size:14px"> 회</span></div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${총품목}개 품목 · 자주 구매한 순</div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>제조사</th><th>품명</th><th class="num">구매횟수 ▼</th><th class="num">총수량</th><th class="num hide-mobile">최근단가</th><th>최근구매일</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+  } catch(e) {
+    document.getElementById('stock-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+    console.error(e);
+  }
+}
+window.searchCustProducts = searchCustProducts;
 
 function toggleStockOnly() {
   stockOnly = !stockOnly;
