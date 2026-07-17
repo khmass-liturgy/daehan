@@ -168,6 +168,7 @@ tr:hover td{background:var(--bg3)}
         <button class="toggle-btn" id="inact-cat-양계" onclick="setCategory('양계')">양계</button>
         <button class="toggle-btn" id="inact-cat-양돈" onclick="setCategory('양돈')">양돈</button>
         <button class="toggle-btn" id="inact-cat-축우" onclick="setCategory('축우')">축우</button>
+        <button class="toggle-btn" id="inact-cat-양견" onclick="setCategory('양견')">양견</button>
         <button class="toggle-btn" id="inact-cat-동물병원/유통" onclick="setCategory('동물병원/유통')">동물병원</button>
         <button class="toggle-btn" id="inact-cat-미분류" onclick="setCategory('미분류')">미분류</button>
       </div>
@@ -635,6 +636,7 @@ function classifyCompany(name) {
   if (축종매핑[name]) return 축종매핑[name];
   // 2) 자동 분류
   const n = name.toLowerCase();
+  if (n.includes('양견') || n.startsWith('양견-')) return '양견';
   if (n.includes('한우') || n.startsWith('ch-') || n.startsWith('cc-') ||
       n.includes('축우') || n.includes('젖소') || n.includes('한육우') || n.includes('목장')) return '축우';
   if (n.includes('양계') || n.includes('계농') || n.includes('산란')) return '양계';
@@ -647,10 +649,10 @@ function classifyCompany(name) {
 function editCategory(회사) {
   const 현재 = 축종매핑[회사] || classifyCompany(회사);
   const isManual = !!축종매핑[회사];
-  const options = ['양계','양돈','축우','동물병원/유통','미분류'];
+  const options = ['양계','양돈','축우','양견','동물병원/유통','미분류'];
   const 색상map = {
     '축우': '#7F77DD','양계': '#f0a050','양돈': '#e05555',
-    '동물병원/유통': '#36c4a0','미분류': 'var(--text3)'
+    '양견': '#e879b3','동물병원/유통': '#36c4a0','미분류': 'var(--text3)'
   };
   
   const html = `
@@ -711,7 +713,7 @@ window.setInactivePeriod = setInactivePeriod;
 
 function setCategory(cat) {
   inactiveCategory = cat;
-  ['all','양계','양돈','축우','동물병원/유통','미분류'].forEach(c => {
+  ['all','양계','양돈','축우','양견','동물병원/유통','미분류'].forEach(c => {
     const btn = document.getElementById('inact-cat-'+c);
     if (btn) btn.classList.toggle('on', c === cat);
   });
@@ -770,6 +772,11 @@ async function searchInactive() {
     // 잔액 5만원 초과만 (5만원 이하 자동 제외)
     items = items.filter(r => r.잔액 > MIN_BALANCE);
     
+    // 양견 카테고리는 미거래 관리에서 자동 제외 (별도 검색 시에는 표시)
+    if (inactiveCategory !== '양견') {
+      items = items.filter(r => r.축종 !== '양견');
+    }
+    
     // 축종 필터
     if (inactiveCategory !== 'all') {
       items = items.filter(r => r.축종 === inactiveCategory);
@@ -808,6 +815,7 @@ async function searchInactive() {
         '축우':   '#7F77DD',
         '양계':   '#f0a050',
         '양돈':   '#e05555',
+        '양견':   '#e879b3',
         '동물병원/유통': '#36c4a0',
         '미분류': 'var(--text3)',
       }[r.축종] || 'var(--text3)';
@@ -839,6 +847,7 @@ async function searchInactive() {
           '축우':   '#7F77DD',
           '양계':   '#f0a050',
           '양돈':   '#e05555',
+          '양견':   '#e879b3',
           '동물병원/유통': '#36c4a0',
           '미분류': 'var(--text3)',
         }[cat] || 'var(--text3)';
