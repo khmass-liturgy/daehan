@@ -678,22 +678,22 @@ async function searchBalance() {
           <strong style="color:var(--blue)">${r.회사||''}</strong>${이름표시}
           <span style="font-size:10px;color:var(--text3);margin-left:6px">📋</span>
         </td>
-        <td class="num">${fmt억(r.총매출)}</td>
-        <td class="num">${fmt억(r.총수금)}</td>
-        <td class="num ${cls}" onclick="showBalanceDetail('${safeName}', ${r.총매출}, ${r.총수금}, ${r.잔액})" style="cursor:pointer" title="잔액 상세 보기">
+        <td class="num ${cls}" onclick="showBalanceDetail('${safeName}', ${r.총매출||0}, ${r.총수금||0}, ${r.잔액||0}, '${r.잔액기준일||''}', '${r.잔액기준계정||''}', ${r.합산잔액||0})" style="cursor:pointer" title="잔액 상세 보기">
           <strong>${fmtNum(r.잔액)}</strong>
           <span style="font-size:10px;color:var(--text3);margin-left:4px">🔍</span>
         </td>
+        <td style="font-size:11px;color:var(--text3)">${r.잔액기준일||'-'}${r.잔액기준계정?' '+r.잔액기준계정:''}</td>
+        <td class="num hide-mobile">${fmt억(r.총매출)}</td>
         <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.최종매출일||''}</td>
       </tr>`;
     }).join('');
     
     document.getElementById('balance-result').innerHTML = `
       <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
-        ${items.length}개 거래처 · 회사명/담당자명 검색 · <span style="color:var(--blue)">거래처명</span>=거래내역 · <span style="color:var(--amber)">잔액</span>=상세보기
+        ${items.length}개 거래처 · 잔액은 최종 명세표 기준 · <span style="color:var(--blue)">거래처명</span>=거래내역 · <span style="color:var(--amber)">잔액</span>=상세보기
       </div>
       <div class="tbl-wrap"><table>
-        <thead><tr><th>거래처 (담당자)</th><th class="num">총 매출</th><th class="num">총 수금</th><th class="num">잔액 ▼</th><th class="hide-mobile">최종거래일</th></tr></thead>
+        <thead><tr><th>거래처 (담당자)</th><th class="num">잔액 ▼</th><th>기준 전표</th><th class="num hide-mobile">누적 매출</th><th class="hide-mobile">최종거래일</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`;
   } catch(e) {
@@ -718,30 +718,34 @@ function goTxnByCompany(name) {
 window.goTxnByCompany = goTxnByCompany;
 
 // 잔액 상세보기 (팝업)
-function showBalanceDetail(name, sales, collected, balance) {
+function showBalanceDetail(name, sales, collected, balance, 기준일, 기준계정, 합산잔액) {
   const html = `
     <div id="bal-detail-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px" onclick="closeBalanceDetail(event)">
       <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:14px;padding:24px;max-width:420px;width:100%" onclick="event.stopPropagation()">
         <div style="font-size:16px;font-weight:700;margin-bottom:6px">${name}</div>
         <div style="font-size:12px;color:var(--text3);margin-bottom:20px">잔액 상세</div>
-        
-        <div style="display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--bg3)">
-          <span style="color:var(--text2)">총 매출</span>
-          <span style="font-size:16px;color:var(--blue);font-weight:600">${fmtNum(sales)}원</span>
+
+        <div style="display:flex;justify-content:space-between;padding:16px 0 8px">
+          <span style="font-size:14px;font-weight:600">현재 잔액 (미수금)</span>
+          <span style="font-size:22px;color:${balance>0?'var(--amber)':balance<0?'var(--green)':'var(--text3)'};font-weight:700">${fmtNum(balance)}원</span>
         </div>
-        <div style="display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--bg3)">
-          <span style="color:var(--text2)">총 수금</span>
-          <span style="font-size:16px;color:var(--green);font-weight:600">- ${fmtNum(collected)}원</span>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:16px">
+          ${기준일 ? `${기준일} ${기준계정} 명세표 기준` : '기준 전표 없음'}
         </div>
-        <div style="display:flex;justify-content:space-between;padding:16px 0 8px;border-top:2px solid var(--border);margin-top:8px">
-          <span style="font-size:14px;font-weight:600">잔액 (미수금)</span>
-          <span style="font-size:20px;color:${balance>0?'var(--amber)':balance<0?'var(--green)':'var(--text3)'};font-weight:700">${fmtNum(balance)}원</span>
+
+        <div style="display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid var(--bg3)">
+          <span style="color:var(--text2);font-size:12px">누적 매출 (전체)</span>
+          <span style="font-size:13px;color:var(--blue)">${fmtNum(sales)}원</span>
         </div>
-        
-        <div style="font-size:11px;color:var(--text3);text-align:center;margin-top:10px">
-          수금률 ${sales>0?((collected/sales)*100).toFixed(1):0}%
+        <div style="display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid var(--bg3)">
+          <span style="color:var(--text2);font-size:12px">누적 수금</span>
+          <span style="font-size:13px;color:var(--green)">${fmtNum(collected)}원</span>
         </div>
-        
+        <div style="display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid var(--bg3)">
+          <span style="color:var(--text3);font-size:12px">참고: 합산 계산값</span>
+          <span style="font-size:13px;color:var(--text3)">${fmtNum(합산잔액)}원</span>
+        </div>
+
         <div style="display:flex;gap:8px;margin-top:20px">
           <button class="search-btn" style="flex:1;background:var(--bg3);color:var(--text2);border:1px solid var(--border2)" onclick="closeBalanceDetail()">닫기</button>
           <button class="search-btn" style="flex:1" onclick="closeBalanceDetail();goTxnByCompany('${name.replace(/'/g,"\\'")}')">거래내역 보기</button>
@@ -819,17 +823,10 @@ async function searchTxn() {
       targetCompany = [...matchedCompanies][0];
       const headColl = collection(window.fbdb, '전표_묶음');
       const hsnap = await getDocs(query(headColl, where('회사','==',targetCompany), orderBy('날짜','asc'), limit(5000)));
-      const headers = hsnap.docs.map(d => d.data());
-      headers.sort((a,b) => {
-        if (a.날짜 !== b.날짜) return a.날짜.localeCompare(b.날짜);
-        return (a.전표번호||'').localeCompare(b.전표번호||'');
-      });
-      let running = 0;
-      headers.forEach(r => {
-        // 외상 매출만 미수금에 반영 (현금/무상 매출은 즉시 결제되어 제외)
-        if (r.계정 === '매출' && r.결재수단 === '외상') running += (+r.합계||0);
-        else if (r.계정 === '수금') running -= (+r.입금액||0);
-        balanceMap[r.전표번호] = running;
+      // ERP 원본이 계산한 명세표 잔액누계를 그대로 사용
+      hsnap.docs.forEach(d => {
+        const r = d.data();
+        if (r.전표번호) balanceMap[r.전표번호] = (+r.잔액누계 || 0);
       });
       showBalance = true;
     }
