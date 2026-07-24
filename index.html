@@ -262,7 +262,7 @@ function doLogin() {
   }
   document.getElementById('login-screen').classList.add('hide');
   document.getElementById('app').classList.add('show');
-  document.getElementById('data-date').textContent = new Date().toLocaleDateString('ko-KR');
+  loadUploadInfo();  // 데이터 업데이트 일자 표시
   loadCategoryMap();  // 축종 매핑 로드 (백그라운드)
   loadProductSpecies();  // 제품 축종 로드
   searchStock();
@@ -279,6 +279,88 @@ function fmt억(n) {
 function fmtNum(n) { return (+n||0).toLocaleString(); }
 function loading(id) { document.getElementById(id).innerHTML = '<div class="loading"><span class="spinner"></span>클라우드 조회 중...</div>'; }
 function empty(id) { document.getElementById(id).innerHTML = '<div class="empty">검색 결과가 없습니다</div>'; }
+
+// ── 데이터 업데이트 일자 표시 ─────────────────────
+async function loadUploadInfo() {
+  const el = document.getElementById('data-date');
+  const { doc, getDoc } = window.fbFuncs;
+  try {
+    const snap = await getDoc(doc(window.fbdb, '메타', '업로드정보'));
+    if (!snap.exists()) {
+      el.textContent = '업데이트 정보 없음';
+      return;
+    }
+    const m = snap.data();
+    const 업로드일 = m.업로드일 || '';
+    const 최신거래일 = m.최신거래일 || '';
+
+    // 업데이트 경과일 계산
+    let 경과표시 = '';
+    if (업로드일) {
+      const diff = Math.floor((new Date() - new Date(업로드일)) / 86400000);
+      if (diff <= 0) 경과표시 = '오늘';
+      else if (diff === 1) 경과표시 = '어제';
+      else 경과표시 = `${diff}일 전`;
+    }
+
+    el.innerHTML = `📅 ${업로드일} 업데이트 <span style="color:var(--text3)">· ${경과표시}</span>`;
+    el.style.cursor = 'pointer';
+    el.title = `데이터 최신 거래일: ${최신거래일}\n업로드 시각: ${m.업로드일시 || ''}\n총 ${(m.총건수||0).toLocaleString()}건`;
+    el.onclick = () => showUploadDetail(m);
+
+    // 30일 넘으면 강조
+    if (업로드일) {
+      const diff = Math.floor((new Date() - new Date(업로드일)) / 86400000);
+      if (diff >= 35) {
+        el.style.borderColor = 'var(--amber)';
+        el.style.color = 'var(--amber)';
+      }
+    }
+  } catch(e) {
+    el.textContent = '업데이트 정보 없음';
+    console.warn('업로드 정보 로드 실패', e);
+  }
+}
+window.loadUploadInfo = loadUploadInfo;
+
+function showUploadDetail(m) {
+  const 건수 = m.건수 || {};
+  const rows = Object.entries(건수)
+    .map(([k,v]) => `<div style="display:flex;justify-content:space-between;padding:7px 0;border-top:1px solid var(--bg3)">
+      <span style="color:var(--text2);font-size:12px">${k}</span>
+      <span style="font-size:12px">${(v||0).toLocaleString()}건</span>
+    </div>`).join('');
+
+  const html = `
+    <div id="upload-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:400;display:flex;align-items:center;justify-content:center;padding:16px" onclick="closeUploadDetail(event)">
+      <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:14px;padding:24px;max-width:380px;width:100%" onclick="event.stopPropagation()">
+        <div style="font-size:16px;font-weight:700;margin-bottom:18px">데이터 업데이트 정보</div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0">
+          <span style="color:var(--text2);font-size:13px">최근 업데이트</span>
+          <span style="font-size:14px;color:var(--blue);font-weight:600">${m.업로드일시 || m.업로드일 || '-'}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0">
+          <span style="color:var(--text2);font-size:13px">데이터 최신 거래일</span>
+          <span style="font-size:14px;color:var(--green);font-weight:600">${m.최신거래일 || '-'}</span>
+        </div>
+        <div style="margin-top:14px">${rows}</div>
+        <div style="display:flex;justify-content:space-between;padding:9px 0;border-top:2px solid var(--border);margin-top:6px">
+          <span style="font-size:13px;font-weight:600">총계</span>
+          <span style="font-size:13px;font-weight:700">${(m.총건수||0).toLocaleString()}건</span>
+        </div>
+        <button class="search-btn" style="width:100%;margin-top:18px;background:var(--bg3);color:var(--text2);border:1px solid var(--border2)" onclick="closeUploadDetail()">닫기</button>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+window.showUploadDetail = showUploadDetail;
+
+function closeUploadDetail(e) {
+  if (e && e.target.id !== 'upload-modal') return;
+  const m = document.getElementById('upload-modal');
+  if (m) m.remove();
+}
+window.closeUploadDetail = closeUploadDetail;
 
 // ── 탭 ───────────────────────────────────────────
 function showTab(name) {
