@@ -236,6 +236,7 @@ tr:hover td{background:var(--bg3)}
       <div class="search-row">
         <button class="toggle-btn on" id="qia-mode-name" onclick="setQiaMode('name')">제품명</button>
         <button class="toggle-btn" id="qia-mode-entp" onclick="setQiaMode('entp')">업체명</button>
+        <button class="toggle-btn" id="qia-mode-ingr" onclick="setQiaMode('ingr')">성분명</button>
       </div>
       <div class="search-row">
         <input class="search-input" id="qia-q" placeholder="제품명을 입력하세요 (예: 이보멕)" onkeydown="if(event.key==='Enter')searchQia()">
@@ -1622,8 +1623,11 @@ let qiaFuzzy = false;
 
 function setQiaMode(mode) {
   qiaMode = mode;
-  ['name','entp'].forEach(m => document.getElementById('qia-mode-'+m).classList.toggle('on', m === mode));
-  document.getElementById('qia-q').placeholder = mode === 'name' ? '제품명을 입력하세요 (예: 이보멕)' : '업체명을 입력하세요 (예: 베링거)';
+  ['name','entp','ingr'].forEach(m => document.getElementById('qia-mode-'+m).classList.toggle('on', m === mode));
+  document.getElementById('qia-q').placeholder =
+    mode === 'name' ? '제품명을 입력하세요 (예: 이보멕)' :
+    mode === 'entp' ? '업체명을 입력하세요 (예: 베링거)' :
+    '성분명을 입력하세요 (예: 이버멕틴)';
 }
 window.setQiaMode = setQiaMode;
 
@@ -1656,7 +1660,8 @@ function parseQiaHtml(html) {
 async function fetchQiaSearch(term, page) {
   const params = new URLSearchParams({ page: String(page), searchDivision: 'detail' });
   if (qiaMode === 'name') params.set('itemName', term);
-  else params.set('entpName', term);
+  else if (qiaMode === 'entp') params.set('entpName', term);
+  else params.set('ingrMainName', term);  // 성분명 (비공식 파라미터, QIA 폼에는 노출 안 됨)
   if (qiaKind) params.set('indutyClassCode', qiaKind);
   const res = await fetch(QIA_BASE + '/searchMedicine?' + params.toString());
   if (!res.ok) throw new Error('QIA 서버 오류 (' + res.status + ')');
@@ -1724,7 +1729,7 @@ async function fuzzySearchQia(q) {
     } catch(e) { /* 후보 하나 실패해도 계속 진행 */ }
     if (collected.size >= 15) break;
   }
-  const field = qiaMode === 'name' ? '제품명' : '업체명';
+  const field = qiaMode === 'name' ? '제품명' : qiaMode === 'entp' ? '업체명' : '주성분';
   const scored = [...collected.values()]
     .map(r => ({ ...r, _sim: qiaSimilarity(q, r[field]) }))
     .filter(r => r._sim >= 0.3)
