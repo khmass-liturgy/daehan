@@ -416,11 +416,7 @@ function showTab(name) {
   if (name === 'inactive' && !document.querySelector('#inactive-result table')) searchInactive();
   if (name === 'salesrank' && !document.querySelector('#salesrank-result table')) searchSalesRank();
   if (name === 'balance' && !document.querySelector('#balance-result table')) searchBalance();
-  if (name === 'txn' && !document.querySelector('#txn-result table')) {
-    document.getElementById('txn-date').value = todayStr();
-    document.getElementById('txn-acct').value = '매출';
-    searchTxn();
-  }
+  if (name === 'txn' && !document.querySelector('#txn-result table')) autoLoadTodayTxn();
   if (name === 'info' && !document.querySelector('#info-result table')) searchInfo();
 }
 window.showTab = showTab;
@@ -1032,6 +1028,21 @@ async function searchTxn() {
   }
 }
 window.searchTxn = searchTxn;
+
+// 거래내역 탭 첫 진입시 자동 표시: 당일 매출 기준, 당일 데이터가 아직 없으면 최근 매출일로 대체
+async function autoLoadTodayTxn() {
+  let dateToUse = todayStr();
+  try {
+    const { collection, query, getDocs, where, orderBy, limit } = window.fbFuncs;
+    const coll = collection(window.fbdb, '전표_세부');
+    const snap = await getDocs(query(coll, where('계정','==','매출'), orderBy('날짜','desc'), limit(1)));
+    if (!snap.empty && snap.docs[0].data().날짜) dateToUse = snap.docs[0].data().날짜;
+  } catch(e) { console.error(e); }
+  document.getElementById('txn-date').value = dateToUse;
+  document.getElementById('txn-acct').value = '매출';
+  searchTxn();
+}
+window.autoLoadTodayTxn = autoLoadTodayTxn;
 
 // ── 미거래 관리 ────────────────────────────────
 let inactiveDays = 60;
