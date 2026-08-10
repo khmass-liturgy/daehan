@@ -246,7 +246,7 @@ tr:hover td{background:var(--bg3)}
         </select>
         <button class="search-btn" onclick="searchQia()">검색</button>
       </div>
-      <div style="font-size:11px;color:var(--text3);margin-bottom:14px">농림축산검역본부(QIA) 동물용의약품통합정보시스템 공식 데이터를 실시간으로 조회합니다</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:14px">농림축산검역본부(QIA) 동물용의약품통합정보시스템 공식 데이터를 실시간으로 조회합니다 · 정확히 일치하지 않으면 비슷한 이름도 찾아드려요</div>
       <div id="qia-result"></div>
     </div>
   </main>
@@ -1618,6 +1618,7 @@ const QIA_BASE = 'https://medi.qia.go.kr';
 let qiaMode = 'name';
 let qiaQuery = '', qiaKind = '', qiaPage = 1, qiaTotal = 0;
 let qiaRows = [];
+let qiaFuzzy = false;
 
 function setQiaMode(mode) {
   qiaMode = mode;
@@ -1652,14 +1653,83 @@ function parseQiaHtml(html) {
   return { rows, total };
 }
 
-async function fetchQiaPage(page) {
+async function fetchQiaSearch(term, page) {
   const params = new URLSearchParams({ page: String(page), searchDivision: 'detail' });
-  if (qiaMode === 'name') params.set('itemName', qiaQuery);
-  else params.set('entpName', qiaQuery);
+  if (qiaMode === 'name') params.set('itemName', term);
+  else params.set('entpName', term);
   if (qiaKind) params.set('indutyClassCode', qiaKind);
   const res = await fetch(QIA_BASE + '/searchMedicine?' + params.toString());
   if (!res.ok) throw new Error('QIA 서버 오류 (' + res.status + ')');
   return parseQiaHtml(await res.text());
+}
+
+async function fetchQiaPage(page) {
+  return fetchQiaSearch(qiaQuery, page);
+}
+
+// ── 오타/유사 키워드 허용 검색 ─────────────────────
+// 편집거리(레벤슈타인) 기반 유사도: 0(완전 다름) ~ 1(완전 일치)
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n; if (!n) return m;
+  const dp = new Array(n+1);
+  for (let j=0;j<=n;j++) dp[j] = j;
+  for (let i=1;i<=m;i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j=1;j<=n;j++) {
+      const tmp = dp[j];
+      const cost = a[i-1] === b[j-1] ? 0 : 1;
+      dp[j] = Math.min(dp[j]+1, dp[j-1]+1, prev+cost);
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
+function qiaSimilarity(a, b) {
+  a = (a||'').toLowerCase().replace(/\s+/g,'');
+  b = (b||'').toLowerCase().replace(/\s+/g,'');
+  if (!a || !b) return 0;
+  return 1 - levenshtein(a, b) / Math.max(a.length, b.length);
+}
+
+// 정확검색 실패시 시도할 후보어 생성: 공백 토큰(긴 것부터) + 뒤에서부터 한 글자씩 줄인 접두사
+function qiaFuzzyCandidates(q) {
+  const seen = new Set([q]);
+  const list = [];
+  q.split(/\s+/).filter(t => t.length >= 2).sort((a,b) => b.length-a.length).forEach(t => {
+    if (!seen.has(t)) { seen.add(t); list.push(t); }
+  });
+  for (let len = q.length - 1; len >= 2; len--) {
+    const p = q.slice(0, len);
+    if (!seen.has(p)) { seen.add(p); list.push(p); }
+  }
+  return list;
+}
+
+// 후보어들로 QIA를 순차 조회, 결과를 모아 원래 검색어와의 유사도순으로 정렬
+async function fuzzySearchQia(q) {
+  const candidates = qiaFuzzyCandidates(q);
+  const collected = new Map();
+  let tries = 0;
+  for (const cand of candidates) {
+    if (tries >= 6 || collected.size >= 60) break;
+    tries++;
+    try {
+      const { rows } = await fetchQiaSearch(cand, 1);
+      rows.forEach(r => {
+        const key = r.링크 || (r.제품명 + '|' + r.업체명);
+        if (!collected.has(key)) collected.set(key, r);
+      });
+    } catch(e) { /* 후보 하나 실패해도 계속 진행 */ }
+    if (collected.size >= 15) break;
+  }
+  const field = qiaMode === 'name' ? '제품명' : '업체명';
+  const scored = [...collected.values()]
+    .map(r => ({ ...r, _sim: qiaSimilarity(q, r[field]) }))
+    .filter(r => r._sim >= 0.3)
+    .sort((a,b) => b._sim - a._sim);
+  return scored.slice(0, 30);
 }
 
 async function searchQia() {
@@ -1671,11 +1741,22 @@ async function searchQia() {
   }
   qiaQuery = q;
   qiaPage = 1;
+  qiaFuzzy = false;
   loading('qia-result');
   try {
     const { rows, total } = await fetchQiaPage(1);
-    qiaRows = rows;
-    qiaTotal = total;
+    if (rows.length) {
+      qiaRows = rows;
+      qiaTotal = total;
+      qiaFuzzy = false;
+    } else {
+      // 정확히 일치하는 결과가 없음 → 비슷한 키워드로 재조회
+      document.getElementById('qia-result').innerHTML = '<div class="loading"><span class="spinner"></span>정확한 일치 결과가 없어 비슷한 이름을 찾는 중...</div>';
+      const fuzzyRows = await fuzzySearchQia(q);
+      qiaRows = fuzzyRows;
+      qiaTotal = fuzzyRows.length;
+      qiaFuzzy = true;
+    }
     renderQiaResult();
   } catch(e) {
     document.getElementById('qia-result').innerHTML = `<div class="empty">조회 실패: ${e.message}<br><span style="font-size:11px">농림축산검역본부(QIA) 서버 연결에 문제가 있을 수 있습니다</span></div>`;
@@ -1685,6 +1766,7 @@ async function searchQia() {
 window.searchQia = searchQia;
 
 async function loadMoreQia() {
+  if (qiaFuzzy) return;  // 유사검색 결과는 이미 유사도순 상위 결과라 페이지네이션 없음
   qiaPage += 1;
   const btn = document.getElementById('qia-more-btn');
   if (btn) { btn.disabled = true; btn.textContent = '불러오는 중...'; }
@@ -1712,15 +1794,24 @@ function renderQiaResult() {
     <td class="hide-mobile">${r.제조수입||''}</td>
   </tr>`).join('');
 
-  const hasMore = qiaRows.length < qiaTotal;
+  const hasMore = !qiaFuzzy && qiaRows.length < qiaTotal;
   const moreBtn = hasMore
     ? `<button id="qia-more-btn" class="toggle-btn" style="width:100%;margin-top:10px" onclick="loadMoreQia()">더 보기 (${qiaRows.length} / ${qiaTotal})</button>`
     : '';
 
+  const fuzzyBanner = qiaFuzzy
+    ? `<div style="margin-bottom:10px;padding:10px 14px;background:var(--bg3);border:1px solid var(--amber);border-radius:8px;font-size:12px;color:var(--amber)">
+        "${qiaQuery}"의 정확한 일치 결과가 없어, 비슷한 이름의 결과 ${qiaRows.length}건을 유사도순으로 보여드립니다
+      </div>`
+    : '';
+
+  const infoLine = qiaFuzzy
+    ? `유사 검색 결과 ${qiaRows.length}건 · 제품명 클릭시 공식 상세정보(새창)`
+    : `QIA 공식 데이터 · 총 ${qiaTotal.toLocaleString()}건 중 ${qiaRows.length}건 표시 · 제품명 클릭시 공식 상세정보(새창)`;
+
   document.getElementById('qia-result').innerHTML = `
-    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
-      QIA 공식 데이터 · 총 ${qiaTotal.toLocaleString()}건 중 ${qiaRows.length}건 표시 · 제품명 클릭시 공식 상세정보(새창)
-    </div>
+    ${fuzzyBanner}
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${infoLine}</div>
     <div class="tbl-wrap"><table>
       <thead><tr><th>제품명</th><th class="hide-mobile">영문명</th><th>업체명</th><th>구분</th><th class="hide-mobile">주성분</th><th class="hide-mobile">허가일</th><th class="hide-mobile">제조/수입</th></tr></thead>
       <tbody>${rows}</tbody>
