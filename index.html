@@ -120,6 +120,7 @@ tr:hover td{background:var(--bg3)}
     <div class="nav-tab" onclick="showTab('txn')">거래내역</div>
     <div class="nav-tab" onclick="showTab('inactive')">미거래 관리</div>
     <div class="nav-tab" onclick="showTab('info')">거래처 정보</div>
+    <div class="nav-tab" onclick="showTab('qia')">동물약품 검색</div>
   </nav>
 
   <main>
@@ -229,6 +230,24 @@ tr:hover td{background:var(--bg3)}
         <button class="search-btn" onclick="searchInfo()">검색</button>
       </div>
       <div id="info-result"></div>
+    </div>
+
+    <div id="tab-qia" style="display:none">
+      <div class="search-row">
+        <button class="toggle-btn on" id="qia-mode-name" onclick="setQiaMode('name')">제품명</button>
+        <button class="toggle-btn" id="qia-mode-entp" onclick="setQiaMode('entp')">업체명</button>
+      </div>
+      <div class="search-row">
+        <input class="search-input" id="qia-q" placeholder="제품명을 입력하세요 (예: 이보멕)" onkeydown="if(event.key==='Enter')searchQia()">
+        <select class="filter" id="qia-kind" onchange="searchQia()">
+          <option value="">전체</option>
+          <option value="A0">의약품</option>
+          <option value="B0">의약외품</option>
+        </select>
+        <button class="search-btn" onclick="searchQia()">검색</button>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:14px">농림축산검역본부(QIA) 동물용의약품통합정보시스템 공식 데이터를 실시간으로 조회합니다</div>
+      <div id="qia-result"></div>
     </div>
   </main>
 </div>
@@ -385,11 +404,11 @@ window.closeUploadDetail = closeUploadDetail;
 
 // ── 탭 ───────────────────────────────────────────
 function showTab(name) {
-  ['stock','balance','salesrank','txn','inactive','info'].forEach(t => {
+  ['stock','balance','salesrank','txn','inactive','info','qia'].forEach(t => {
     document.getElementById('tab-'+t).style.display = t === name ? '' : 'none';
   });
   document.querySelectorAll('.nav-tab').forEach((el,i) => {
-    el.classList.toggle('active', ['stock','balance','salesrank','txn','inactive','info'][i] === name);
+    el.classList.toggle('active', ['stock','balance','salesrank','txn','inactive','info','qia'][i] === name);
   });
   if (name === 'inactive' && !document.querySelector('#inactive-result table')) searchInactive();
   if (name === 'salesrank' && !document.querySelector('#salesrank-result table')) searchSalesRank();
@@ -1593,6 +1612,121 @@ function closeCompanyDetail(e) {
   if (m) m.remove();
 }
 window.closeCompanyDetail = closeCompanyDetail;
+
+// ── 동물약품 검색 (QIA 동물용의약품통합정보시스템 실시간 조회) ──
+const QIA_BASE = 'https://medi.qia.go.kr';
+let qiaMode = 'name';
+let qiaQuery = '', qiaKind = '', qiaPage = 1, qiaTotal = 0;
+let qiaRows = [];
+
+function setQiaMode(mode) {
+  qiaMode = mode;
+  ['name','entp'].forEach(m => document.getElementById('qia-mode-'+m).classList.toggle('on', m === mode));
+  document.getElementById('qia-q').placeholder = mode === 'name' ? '제품명을 입력하세요 (예: 이보멕)' : '업체명을 입력하세요 (예: 베링거)';
+}
+window.setQiaMode = setQiaMode;
+
+function parseQiaHtml(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const getVal = td => {
+    const spans = td.querySelectorAll('span');
+    return spans.length >= 2 ? spans[1].textContent.trim() : td.textContent.trim();
+  };
+  const rows = [...doc.querySelectorAll('table tbody tr')].map(tr => {
+    const tds = [...tr.querySelectorAll('td')];
+    if (tds.length < 13) return null;
+    const link = tds[1].querySelector('a');
+    return {
+      제품명: getVal(tds[1]),
+      링크: link ? (QIA_BASE + link.getAttribute('href')) : '',
+      제품영문명: getVal(tds[2]),
+      업체명: getVal(tds[3]),
+      허가일: getVal(tds[6]),
+      품목구분: getVal(tds[7]),
+      주성분: getVal(tds[8]),
+      제조수입: getVal(tds[11]),
+    };
+  }).filter(Boolean);
+  const m = doc.body.textContent.match(/총\s*([\d,]+)\s*건/);
+  const total = m ? +m[1].replace(/,/g,'') : rows.length;
+  return { rows, total };
+}
+
+async function fetchQiaPage(page) {
+  const params = new URLSearchParams({ page: String(page), searchDivision: 'detail' });
+  if (qiaMode === 'name') params.set('itemName', qiaQuery);
+  else params.set('entpName', qiaQuery);
+  if (qiaKind) params.set('indutyClassCode', qiaKind);
+  const res = await fetch(QIA_BASE + '/searchMedicine?' + params.toString());
+  if (!res.ok) throw new Error('QIA 서버 오류 (' + res.status + ')');
+  return parseQiaHtml(await res.text());
+}
+
+async function searchQia() {
+  const q = document.getElementById('qia-q').value.trim();
+  qiaKind = document.getElementById('qia-kind').value;
+  if (!q) {
+    document.getElementById('qia-result').innerHTML = '<div class="empty">검색어를 입력하세요</div>';
+    return;
+  }
+  qiaQuery = q;
+  qiaPage = 1;
+  loading('qia-result');
+  try {
+    const { rows, total } = await fetchQiaPage(1);
+    qiaRows = rows;
+    qiaTotal = total;
+    renderQiaResult();
+  } catch(e) {
+    document.getElementById('qia-result').innerHTML = `<div class="empty">조회 실패: ${e.message}<br><span style="font-size:11px">농림축산검역본부(QIA) 서버 연결에 문제가 있을 수 있습니다</span></div>`;
+    console.error(e);
+  }
+}
+window.searchQia = searchQia;
+
+async function loadMoreQia() {
+  qiaPage += 1;
+  const btn = document.getElementById('qia-more-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '불러오는 중...'; }
+  try {
+    const { rows } = await fetchQiaPage(qiaPage);
+    qiaRows = qiaRows.concat(rows);
+    renderQiaResult();
+  } catch(e) {
+    alert('추가 조회 실패: ' + e.message);
+    qiaPage -= 1;
+  }
+}
+window.loadMoreQia = loadMoreQia;
+
+function renderQiaResult() {
+  if (!qiaRows.length) { empty('qia-result'); return; }
+
+  const rows = qiaRows.map(r => `<tr>
+    <td>${r.링크 ? `<a href="${r.링크}" target="_blank" rel="noopener" style="color:var(--blue);font-weight:600">${r.제품명||''} ↗</a>` : `<strong>${r.제품명||''}</strong>`}</td>
+    <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.제품영문명||''}</td>
+    <td>${r.업체명||''}</td>
+    <td><span class="tag ${r.품목구분==='동물용의약품'?'tag-매출':'tag-매입'}">${r.품목구분||''}</span></td>
+    <td class="hide-mobile">${r.주성분||''}</td>
+    <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.허가일||''}</td>
+    <td class="hide-mobile">${r.제조수입||''}</td>
+  </tr>`).join('');
+
+  const hasMore = qiaRows.length < qiaTotal;
+  const moreBtn = hasMore
+    ? `<button id="qia-more-btn" class="toggle-btn" style="width:100%;margin-top:10px" onclick="loadMoreQia()">더 보기 (${qiaRows.length} / ${qiaTotal})</button>`
+    : '';
+
+  document.getElementById('qia-result').innerHTML = `
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
+      QIA 공식 데이터 · 총 ${qiaTotal.toLocaleString()}건 중 ${qiaRows.length}건 표시 · 제품명 클릭시 공식 상세정보(새창)
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>제품명</th><th class="hide-mobile">영문명</th><th>업체명</th><th>구분</th><th class="hide-mobile">주성분</th><th class="hide-mobile">허가일</th><th class="hide-mobile">제조/수입</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    ${moreBtn}`;
+}
 </script>
 </body>
 </html>
