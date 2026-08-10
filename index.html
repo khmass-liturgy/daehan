@@ -116,6 +116,7 @@ tr:hover td{background:var(--bg3)}
   <nav>
     <div class="nav-tab active" onclick="showTab('stock')">재고 조회</div>
     <div class="nav-tab" onclick="showTab('balance')">거래처 잔액</div>
+    <div class="nav-tab" onclick="showTab('salesrank')">매출 순위</div>
     <div class="nav-tab" onclick="showTab('txn')">거래내역</div>
     <div class="nav-tab" onclick="showTab('inactive')">미거래 관리</div>
     <div class="nav-tab" onclick="showTab('info')">거래처 정보</div>
@@ -165,6 +166,26 @@ tr:hover td{background:var(--bg3)}
         <button class="search-btn" onclick="searchBalance()">검색</button>
       </div>
       <div id="balance-result"></div>
+    </div>
+
+    <div id="tab-salesrank" style="display:none">
+      <div class="search-row">
+        <button class="toggle-btn on" id="sr-cat-all" onclick="setSalesRankCategory('all')">전체</button>
+        <button class="toggle-btn" id="sr-cat-양계" onclick="setSalesRankCategory('양계')">🐔 양계</button>
+        <button class="toggle-btn" id="sr-cat-양돈" onclick="setSalesRankCategory('양돈')">🐷 양돈</button>
+        <button class="toggle-btn" id="sr-cat-축우" onclick="setSalesRankCategory('축우')">🐄 축우</button>
+        <button class="toggle-btn" id="sr-cat-양견" onclick="setSalesRankCategory('양견')">🐕 양견</button>
+        <button class="toggle-btn" id="sr-cat-동물병원/유통" onclick="setSalesRankCategory('동물병원/유통')">동물병원/유통</button>
+        <button class="toggle-btn" id="sr-cat-미분류" onclick="setSalesRankCategory('미분류')">미분류</button>
+      </div>
+      <div class="search-row">
+        <select class="filter" id="sr-topn" onchange="searchSalesRank()">
+          <option value="20">상위 20곳</option>
+          <option value="50" selected>상위 50곳</option>
+          <option value="100">상위 100곳</option>
+        </select>
+      </div>
+      <div id="salesrank-result"></div>
     </div>
 
     <div id="tab-txn" style="display:none">
@@ -364,13 +385,14 @@ window.closeUploadDetail = closeUploadDetail;
 
 // ── 탭 ───────────────────────────────────────────
 function showTab(name) {
-  ['stock','balance','txn','inactive','info'].forEach(t => {
+  ['stock','balance','salesrank','txn','inactive','info'].forEach(t => {
     document.getElementById('tab-'+t).style.display = t === name ? '' : 'none';
   });
   document.querySelectorAll('.nav-tab').forEach((el,i) => {
-    el.classList.toggle('active', ['stock','balance','txn','inactive','info'][i] === name);
+    el.classList.toggle('active', ['stock','balance','salesrank','txn','inactive','info'][i] === name);
   });
   if (name === 'inactive' && !document.querySelector('#inactive-result table')) searchInactive();
+  if (name === 'salesrank' && !document.querySelector('#salesrank-result table')) searchSalesRank();
 }
 window.showTab = showTab;
 
@@ -1303,6 +1325,135 @@ async function searchInactive() {
   }
 }
 window.searchInactive = searchInactive;
+
+// ── 축종별 매출 순위 ──────────────────────────────
+let salesRankCategory = 'all';
+
+function setSalesRankCategory(cat) {
+  salesRankCategory = cat;
+  ['all','양계','양돈','축우','양견','동물병원/유통','미분류'].forEach(c => {
+    const btn = document.getElementById('sr-cat-'+c);
+    if (btn) btn.classList.toggle('on', c === cat);
+  });
+  searchSalesRank();
+}
+window.setSalesRankCategory = setSalesRankCategory;
+
+async function searchSalesRank() {
+  loading('salesrank-result');
+  const topN = +document.getElementById('sr-topn').value || 50;
+
+  const { collection, query, getDocs, limit } = window.fbFuncs;
+
+  try {
+    // 축종 매핑 + 제품 구매 기반 추론 재로드
+    await loadCategoryMap();
+    await inferCompanySpecies();
+
+    const balColl = collection(window.fbdb, '잔액');
+    const custColl = collection(window.fbdb, '거래처');
+    const [balSnap, custSnap] = await Promise.all([
+      getDocs(query(balColl, limit(2000))),
+      getDocs(query(custColl, limit(2000)))
+    ]);
+
+    const custMap = new Map();
+    custSnap.docs.forEach(d => {
+      const r = d.data();
+      if (r.회사) custMap.set(r.회사, { 이름: r.이름 || '', 전화: r.전화1 || '', 담당사원: r.담당사원 || '' });
+    });
+
+    const 전체목록 = balSnap.docs
+      .map(d => d.data())
+      .filter(r => (r.총매출 || 0) > 0)
+      .map(r => {
+        const info = custMap.get(r.회사) || {};
+        return {
+          ...r,
+          이름: info.이름,
+          전화: info.전화,
+          담당사원: info.담당사원,
+          축종: classifyCompany(r.회사),
+        };
+      });
+
+    // 축종별 집계 (필터 적용 전 전체 기준)
+    const catStats = {};
+    전체목록.forEach(r => {
+      catStats[r.축종] = catStats[r.축종] || { 수: 0, 금액: 0 };
+      catStats[r.축종].수 += 1;
+      catStats[r.축종].금액 += (r.총매출 || 0);
+    });
+
+    // 축종 필터
+    let items = salesRankCategory === 'all'
+      ? 전체목록
+      : 전체목록.filter(r => r.축종 === salesRankCategory);
+
+    // 매출 많은 순 정렬 + 상위 N
+    items.sort((a,b) => (b.총매출||0) - (a.총매출||0));
+    const 필터건수 = items.length;
+    items = items.slice(0, topN);
+
+    if (!items.length) { empty('salesrank-result'); return; }
+
+    const 축종Color = {
+      '축우':   '#7F77DD',
+      '양계':   '#f0a050',
+      '양돈':   '#e05555',
+      '양견':   '#e879b3',
+      '동물병원/유통': '#36c4a0',
+      '미분류': 'var(--text3)',
+    };
+
+    const catBadges = Object.entries(catStats)
+      .sort((a,b) => b[1].금액 - a[1].금액)
+      .map(([cat, s]) => {
+        const c = 축종Color[cat] || 'var(--text3)';
+        return `<span onclick="setSalesRankCategory('${cat}')" style="cursor:pointer;display:inline-block;margin-right:8px;padding:3px 10px;border-radius:12px;background:${c}22;color:${c};font-size:11px;font-weight:600">${cat} ${s.수}곳 · ${fmt억(s.금액)}</span>`;
+      }).join('');
+
+    const rows = items.map((r, i) => {
+      const safeName = (r.회사||'').replace(/'/g,"\\'");
+      const isManual = !!축종매핑[r.회사];
+      const c = 축종Color[r.축종] || 'var(--text3)';
+      const 이름표시 = r.이름 ? `<span style="font-size:11px;color:var(--text3);margin-left:6px">(${r.이름})</span>` : '';
+      const balCls = r.잔액 > 0 ? 'pos' : r.잔액 < 0 ? 'neg' : 'zero';
+      return `<tr>
+        <td class="num" style="color:var(--text3)">${i+1}</td>
+        <td onclick="goTxnByCompany('${safeName}')" style="cursor:pointer" title="거래내역 보기">
+          <strong style="color:var(--blue)">${r.회사||''}</strong>${이름표시}
+        </td>
+        <td>
+          <span onclick="editCategory('${safeName}')" title="클릭하여 축종 변경"
+            style="cursor:pointer;font-size:10px;padding:2px 6px;border-radius:8px;background:${c}33;color:${c};font-weight:600;border:1px solid ${isManual?c:'transparent'}">
+            ${r.축종}${isManual?' ✎':''}
+          </span>
+        </td>
+        <td class="num"><strong>${fmt억(r.총매출)}</strong></td>
+        <td class="num hide-mobile ${balCls}">${fmtNum(r.잔액)}</td>
+        <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.최종매출일||''}</td>
+        <td class="hide-mobile">${r.담당사원||''}</td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('salesrank-result').innerHTML = `
+      <div style="margin-bottom:12px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px">
+        ${catBadges || '<span style="color:var(--text3);font-size:11px">데이터 없음</span>'}
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
+        ${salesRankCategory === 'all' ? '전체' : salesRankCategory} · 매출 상위 ${items.length}곳 (해당 축종 ${필터건수}곳 중) · 축종 태그 클릭하여 지정
+      </div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>#</th><th>거래처 (담당자)</th><th>축종</th><th class="num">누적매출 ▼</th><th class="num hide-mobile">잔액</th><th class="hide-mobile">최종매출일</th><th class="hide-mobile">담당사원</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+  } catch(e) {
+    document.getElementById('salesrank-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+    console.error(e);
+  }
+}
+window.searchSalesRank = searchSalesRank;
 
 // ── 거래처 정보 ────────────────────────────────
 async function searchInfo() {
