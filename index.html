@@ -323,6 +323,32 @@ function todayStr() { const d = new Date(); return d.getFullYear()+'-'+String(d.
 function loading(id) { document.getElementById(id).innerHTML = '<div class="loading"><span class="spinner"></span>클라우드 조회 중...</div>'; }
 function empty(id) { document.getElementById(id).innerHTML = '<div class="empty">검색 결과가 없습니다</div>'; }
 
+// ── 정렬 가능한 표 헤더 공통 유틸 ──────────────────
+// state: { key, dir: 'asc'|'desc' } | null
+// type: 'text'(기본 오름차순=가나다순) | 'num'(기본 내림차순=많은순) | 'date'(기본 내림차순=최근순)
+function thSort(label, key, state, fnName, extraClass) {
+  const active = state && state.key === key;
+  const arrow = active ? (state.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  const cls = extraClass ? ` class="${extraClass}"` : '';
+  return `<th${cls} onclick="${fnName}('${key}')" style="cursor:pointer;user-select:none${active?';color:var(--blue)':''}" title="클릭하여 정렬">${label}${arrow}</th>`;
+}
+function toggleSort(state, key, type) {
+  if (state && state.key === key) return { key, dir: state.dir === 'asc' ? 'desc' : 'asc' };
+  return { key, dir: type === 'text' ? 'asc' : 'desc' };
+}
+function sortBy(items, state, typeMap) {
+  if (!state || !state.key) return items;
+  const { key, dir } = state;
+  const type = (typeMap && typeMap[key]) || 'text';
+  const sorted = [...items].sort((a,b) => {
+    if (type === 'num') return (+a[key]||0) - (+b[key]||0);
+    // 날짜(YYYY-MM-DD)와 텍스트 모두 문자열 비교로 처리 (날짜 형식이 사전식 정렬과 시간순이 일치)
+    return String(a[key]||'').localeCompare(String(b[key]||''), 'ko');
+  });
+  if (dir === 'desc') sorted.reverse();
+  return sorted;
+}
+
 // ── 데이터 업데이트 일자 표시 ─────────────────────
 async function loadUploadInfo() {
   const el = document.getElementById('data-date');
@@ -575,14 +601,24 @@ async function loadMfgList() {
   } catch(e) { console.warn('제조사 목록 로드 실패', e); }
 }
 
+let stockItems = [];
+let stockSort = { key: '현재재고', dir: 'desc' };
+const STOCK_SORT_TYPES = { 대분류:'text', 품명:'text', _축종:'text', 현재재고:'num', 판매소매단가:'num', 구매최종단가:'num' };
+
+function setStockSort(key) {
+  stockSort = toggleSort(stockSort, key, STOCK_SORT_TYPES[key]);
+  renderStockResult();
+}
+window.setStockSort = setStockSort;
+
 async function searchStock() {
   const q = document.getElementById('stock-q').value.trim().toLowerCase();
   const mfg = document.getElementById('stock-mfg').value;
   loading('stock-result');
-  
+
   const { collection, query, getDocs, where, limit } = window.fbFuncs;
   const coll = collection(window.fbdb, '제품');
-  
+
   try {
     let snap;
     if (stockOnly) {
@@ -590,23 +626,23 @@ async function searchStock() {
     } else {
       snap = await getDocs(query(coll, limit(1200)));
     }
-    
+
     let items = snap.docs.map(d => d.data());
-    
+
     // 제조사 필터 (제조사별 모드)
     if (mfg) {
       items = items.filter(r => r.대분류 === mfg);
     }
-    
+
     // 품명 검색
     if (q) {
-      items = items.filter(r => 
-        (r.품명||'').toLowerCase().includes(q) || 
+      items = items.filter(r =>
+        (r.품명||'').toLowerCase().includes(q) ||
         (r.대분류||'').toLowerCase().includes(q) ||
         (r.품명초성||'').includes(q)
       );
     }
-    
+
     // 제품 축종 필터
     if (stockSpecies !== 'all') {
       items = items.filter(r => {
@@ -614,56 +650,76 @@ async function searchStock() {
         return sp === stockSpecies;
       });
     }
-    
-    // 재고 많은 순 정렬
-    items.sort((a, b) => {
-      const aStock = +a.현재재고 || 0;
-      const bStock = +b.현재재고 || 0;
-      if (aStock !== bStock) return bStock - aStock;
-      return (a.품명||'').localeCompare(b.품명||'');
-    });
-    
-    if (!items.length) { empty('stock-result'); return; }
-    
-    const 색상map = { '양계':'#f0a050','양돈':'#e05555','축우':'#7F77DD','공통':'#36c4a0','미지정':'var(--text3)' };
-    
-    const rows = items.slice(0, 300).map(r => {
-      const has = r.현재재고 > 0;
-      const sp = 제품축종[r.품명] || '미지정';
-      const spColor = 색상map[sp];
-      const safe = (r.품명||'').replace(/'/g,"\\'");
-      return `<tr>
-        <td>${r.대분류||''}</td>
-        <td onclick="showProductBuyers('${safe}')" style="cursor:pointer" title="이 제품을 구매한 거래처 보기">
-          <strong style="color:var(--blue)">${r.품명||''}</strong> <span style="font-size:10px;color:var(--text3)">🔍</span>
-        </td>
-        <td>
-          <span onclick="editProductSpecies('${safe}')" title="클릭하여 축종 지정"
-            style="cursor:pointer;font-size:10px;padding:2px 7px;border-radius:8px;background:${spColor}22;color:${spColor};font-weight:600;border:1px solid ${sp!=='미지정'?spColor:'transparent'}">
-            ${sp}${sp!=='미지정'?' ✎':' +'}
-          </span>
-        </td>
-        <td class="num"><span class="tag ${has?'tag-재고있음':'tag-재고없음'}">${fmtNum(r.현재재고)}</span></td>
-        <td class="num hide-mobile">${fmtNum(r.판매소매단가)}</td>
-        <td class="num hide-mobile">${fmtNum(r.구매최종단가)}</td>
-      </tr>`;
-    }).join('');
-    
-    const 제목 = mfg ? `[${mfg}] ` : '';
-    const 축종제목 = stockSpecies !== 'all' ? `[${stockSpecies}] ` : '';
-    document.getElementById('stock-result').innerHTML = `
-      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${제목}${축종제목}${items.length}개 품목 · 축종 태그 클릭하여 지정</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>제조사</th><th>품명</th><th>축종</th><th class="num">현재재고 ▼</th><th class="num hide-mobile">소매단가</th><th class="num hide-mobile">구매단가</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>`;
+
+    items.forEach(r => { r._축종 = 제품축종[r.품명] || '미지정'; });
+
+    stockItems = items;
+    renderStockResult();
   } catch(e) {
     document.getElementById('stock-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
   }
 }
 window.searchStock = searchStock;
 
+function renderStockResult() {
+  const mfg = document.getElementById('stock-mfg').value;
+
+  if (!stockItems.length) { empty('stock-result'); return; }
+
+  const 색상map = { '양계':'#f0a050','양돈':'#e05555','축우':'#7F77DD','공통':'#36c4a0','미지정':'var(--text3)' };
+  const items = sortBy(stockItems, stockSort, STOCK_SORT_TYPES);
+
+  const rows = items.slice(0, 300).map(r => {
+    const has = r.현재재고 > 0;
+    const sp = r._축종;
+    const spColor = 색상map[sp];
+    const safe = (r.품명||'').replace(/'/g,"\\'");
+    return `<tr>
+      <td>${r.대분류||''}</td>
+      <td onclick="showProductBuyers('${safe}')" style="cursor:pointer" title="이 제품을 구매한 거래처 보기">
+        <strong style="color:var(--blue)">${r.품명||''}</strong> <span style="font-size:10px;color:var(--text3)">🔍</span>
+      </td>
+      <td>
+        <span onclick="editProductSpecies('${safe}')" title="클릭하여 축종 지정"
+          style="cursor:pointer;font-size:10px;padding:2px 7px;border-radius:8px;background:${spColor}22;color:${spColor};font-weight:600;border:1px solid ${sp!=='미지정'?spColor:'transparent'}">
+          ${sp}${sp!=='미지정'?' ✎':' +'}
+        </span>
+      </td>
+      <td class="num"><span class="tag ${has?'tag-재고있음':'tag-재고없음'}">${fmtNum(r.현재재고)}</span></td>
+      <td class="num hide-mobile">${fmtNum(r.판매소매단가)}</td>
+      <td class="num hide-mobile">${fmtNum(r.구매최종단가)}</td>
+    </tr>`;
+  }).join('');
+
+  const 제목 = mfg ? `[${mfg}] ` : '';
+  const 축종제목 = stockSpecies !== 'all' ? `[${stockSpecies}] ` : '';
+  document.getElementById('stock-result').innerHTML = `
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${제목}${축종제목}${items.length}개 품목 · 헤더 클릭시 정렬 · 축종 태그 클릭하여 지정</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        ${thSort('제조사','대분류',stockSort,'setStockSort')}
+        ${thSort('품명','품명',stockSort,'setStockSort')}
+        ${thSort('축종','_축종',stockSort,'setStockSort')}
+        ${thSort('현재재고','현재재고',stockSort,'setStockSort','num')}
+        ${thSort('소매단가','판매소매단가',stockSort,'setStockSort','num hide-mobile')}
+        ${thSort('구매단가','구매최종단가',stockSort,'setStockSort','num hide-mobile')}
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+
 // 거래처 구매내역 조회
+let custProdItems = [];
+let custProdInfo = null;  // { 실제거래처, 총구매횟수 }
+let custProdSort = { key: '구매횟수', dir: 'desc' };
+const CUSTPROD_SORT_TYPES = { 대분류:'text', 품명:'text', 구매횟수:'num', 총수량:'num', 최근단가:'num', 최근구매:'date' };
+
+function setCustProdSort(key) {
+  custProdSort = toggleSort(custProdSort, key, CUSTPROD_SORT_TYPES[key]);
+  renderCustProdResult();
+}
+window.setCustProdSort = setCustProdSort;
+
 async function searchCustProducts() {
   const company = document.getElementById('stock-cust-q').value.trim();
   if (!company) {
@@ -671,29 +727,27 @@ async function searchCustProducts() {
     return;
   }
   loading('stock-result');
-  
+
   const { collection, query, getDocs, where, orderBy, limit } = window.fbFuncs;
   const coll = collection(window.fbdb, '전표_세부');
-  
+
   try {
     // 해당 거래처의 매출(=거래처가 구매) 세부 내역
     const snap = await getDocs(query(coll, where('회사','==',company), where('계정','==','매출'), orderBy('날짜','desc'), limit(3000)));
     let details = snap.docs.map(d => d.data());
-    
+
     // 회사명 부분일치 재시도 (정확 매칭 실패 시)
     if (!details.length) {
       const allSnap = await getDocs(query(coll, where('계정','==','매출'), orderBy('날짜','desc'), limit(5000)));
       const kw = company.toLowerCase();
       details = allSnap.docs.map(d => d.data()).filter(r => (r.회사||'').toLowerCase().includes(kw));
     }
-    
-    if (!details.length) { 
+
+    if (!details.length) {
       document.getElementById('stock-result').innerHTML = `<div class="empty">${company}의 구매 내역이 없습니다</div>`;
-      return; 
+      return;
     }
-    
-    const 실제거래처 = details[0].회사;
-    
+
     // 품명별 집계
     const prodMap = new Map();
     details.forEach(r => {
@@ -707,48 +761,10 @@ async function searchCustProducts() {
       }
       prodMap.set(key, cur);
     });
-    
-    let items = [...prodMap.values()];
-    items.sort((a,b) => b.구매횟수 - a.구매횟수);
-    
-    const 총품목 = items.length;
-    const 총구매횟수 = details.length;
-    
-    const rows = items.slice(0, 300).map(r => {
-      const safeP = (r.품명||'').replace(/'/g,"\\'");
-      return `<tr>
-      <td>${r.대분류||''}</td>
-      <td onclick="showProductBuyers('${safeP}')" style="cursor:pointer" title="이 제품을 구매한 거래처 보기">
-        <strong style="color:var(--blue)">${r.품명||''}</strong> <span style="font-size:10px;color:var(--text3)">🔍</span>
-      </td>
-      <td class="num">${r.구매횟수}회</td>
-      <td class="num">${fmtNum(r.총수량)}</td>
-      <td class="num hide-mobile">${fmtNum(r.최근단가)}</td>
-      <td style="font-size:11px;color:var(--text3)">${r.최근구매||''}</td>
-    </tr>`;
-    }).join('');
-    
-    document.getElementById('stock-result').innerHTML = `
-      <div class="kpi-grid" style="margin-bottom:14px">
-        <div class="kpi b" style="grid-column:span 2">
-          <div class="kpi-lbl">거래처</div>
-          <div class="kpi-val" style="font-size:18px">${실제거래처}</div>
-          <div class="kpi-sub">구매 제품 분석</div>
-        </div>
-        <div class="kpi g">
-          <div class="kpi-lbl">구매 품목 수</div>
-          <div class="kpi-val">${총품목}<span style="font-size:14px"> 종</span></div>
-        </div>
-        <div class="kpi p">
-          <div class="kpi-lbl">총 구매 횟수</div>
-          <div class="kpi-val">${총구매횟수}<span style="font-size:14px"> 회</span></div>
-        </div>
-      </div>
-      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${총품목}개 품목 · 자주 구매한 순</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>제조사</th><th>품명</th><th class="num">구매횟수 ▼</th><th class="num">총수량</th><th class="num hide-mobile">최근단가</th><th>최근구매일</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>`;
+
+    custProdItems = [...prodMap.values()];
+    custProdInfo = { 실제거래처: details[0].회사, 총구매횟수: details.length };
+    renderCustProdResult();
   } catch(e) {
     document.getElementById('stock-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
     console.error(e);
@@ -756,7 +772,67 @@ async function searchCustProducts() {
 }
 window.searchCustProducts = searchCustProducts;
 
+function renderCustProdResult() {
+  if (!custProdItems.length || !custProdInfo) { empty('stock-result'); return; }
+  const { 실제거래처, 총구매횟수 } = custProdInfo;
+  const 총품목 = custProdItems.length;
+  const items = sortBy(custProdItems, custProdSort, CUSTPROD_SORT_TYPES);
+
+  const rows = items.slice(0, 300).map(r => {
+    const safeP = (r.품명||'').replace(/'/g,"\\'");
+    return `<tr>
+    <td>${r.대분류||''}</td>
+    <td onclick="showProductBuyers('${safeP}')" style="cursor:pointer" title="이 제품을 구매한 거래처 보기">
+      <strong style="color:var(--blue)">${r.품명||''}</strong> <span style="font-size:10px;color:var(--text3)">🔍</span>
+    </td>
+    <td class="num">${r.구매횟수}회</td>
+    <td class="num">${fmtNum(r.총수량)}</td>
+    <td class="num hide-mobile">${fmtNum(r.최근단가)}</td>
+    <td style="font-size:11px;color:var(--text3)">${r.최근구매||''}</td>
+  </tr>`;
+  }).join('');
+
+  document.getElementById('stock-result').innerHTML = `
+    <div class="kpi-grid" style="margin-bottom:14px">
+      <div class="kpi b" style="grid-column:span 2">
+        <div class="kpi-lbl">거래처</div>
+        <div class="kpi-val" style="font-size:18px">${실제거래처}</div>
+        <div class="kpi-sub">구매 제품 분석</div>
+      </div>
+      <div class="kpi g">
+        <div class="kpi-lbl">구매 품목 수</div>
+        <div class="kpi-val">${총품목}<span style="font-size:14px"> 종</span></div>
+      </div>
+      <div class="kpi p">
+        <div class="kpi-lbl">총 구매 횟수</div>
+        <div class="kpi-val">${총구매횟수}<span style="font-size:14px"> 회</span></div>
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${총품목}개 품목 · 헤더 클릭시 정렬</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        ${thSort('제조사','대분류',custProdSort,'setCustProdSort')}
+        ${thSort('품명','품명',custProdSort,'setCustProdSort')}
+        ${thSort('구매횟수','구매횟수',custProdSort,'setCustProdSort','num')}
+        ${thSort('총수량','총수량',custProdSort,'setCustProdSort','num')}
+        ${thSort('최근단가','최근단가',custProdSort,'setCustProdSort','num hide-mobile')}
+        ${thSort('최근구매일','최근구매',custProdSort,'setCustProdSort')}
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+
 // 제품별 구매 거래처 (품명 → 이 제품을 산 농가 목록) 팝업
+let pbFarms = [];
+let pbSort = { key: '구매횟수', dir: 'desc' };
+const PB_SORT_TYPES = { 회사:'text', 구매횟수:'num', 총수량:'num', 최근구매:'date' };
+
+function setPbSort(key) {
+  pbSort = toggleSort(pbSort, key, PB_SORT_TYPES[key]);
+  renderProductBuyers();
+}
+window.setPbSort = setPbSort;
+
 async function showProductBuyers(품명) {
   const html = `
     <div id="prod-buyers-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:400;display:flex;align-items:center;justify-content:center;padding:16px" onclick="closeProductBuyers(event)">
@@ -797,32 +873,43 @@ async function showProductBuyers(품명) {
       map.set(key, cur);
     });
 
-    let farms = [...map.values()];
-    farms.sort((a,b) => b.구매횟수 - a.구매횟수);
+    pbFarms = [...map.values()];
+    pbSort = { key: '구매횟수', dir: 'desc' };
 
-    document.getElementById('pb-sub').textContent = `${farms.length}개 거래처 구매 (최근 1년치 데이터 기준)`;
-
-    const rows = farms.slice(0, 200).map(r => {
-      const safe = (r.회사||'').replace(/'/g,"\\'");
-      return `<tr onclick="closeProductBuyers();goTxnByCompany('${safe}')" style="cursor:pointer" title="거래내역 보기">
-        <td><strong style="color:var(--blue)">${r.회사}</strong></td>
-        <td class="num">${r.구매횟수}회</td>
-        <td class="num">${fmtNum(r.총수량)}</td>
-        <td style="font-size:11px;color:var(--text3)">${r.최근구매}</td>
-      </tr>`;
-    }).join('');
-
-    document.getElementById('pb-body').innerHTML = `
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>거래처</th><th class="num">구매횟수 ▼</th><th class="num">총수량</th><th>최근구매일</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>`;
+    document.getElementById('pb-sub').textContent = `${pbFarms.length}개 거래처 구매 (최근 1년치 데이터 기준)`;
+    renderProductBuyers();
   } catch(e) {
     document.getElementById('pb-body').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
     console.error(e);
   }
 }
 window.showProductBuyers = showProductBuyers;
+
+function renderProductBuyers() {
+  if (!document.getElementById('pb-body')) return;  // 팝업이 이미 닫힌 경우
+  const farms = sortBy(pbFarms, pbSort, PB_SORT_TYPES);
+
+  const rows = farms.slice(0, 200).map(r => {
+    const safe = (r.회사||'').replace(/'/g,"\\'");
+    return `<tr onclick="closeProductBuyers();goTxnByCompany('${safe}')" style="cursor:pointer" title="거래내역 보기">
+      <td><strong style="color:var(--blue)">${r.회사}</strong></td>
+      <td class="num">${r.구매횟수}회</td>
+      <td class="num">${fmtNum(r.총수량)}</td>
+      <td style="font-size:11px;color:var(--text3)">${r.최근구매}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('pb-body').innerHTML = `
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        ${thSort('거래처','회사',pbSort,'setPbSort')}
+        ${thSort('구매횟수','구매횟수',pbSort,'setPbSort','num')}
+        ${thSort('총수량','총수량',pbSort,'setPbSort','num')}
+        ${thSort('최근구매일','최근구매',pbSort,'setPbSort')}
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
 
 function closeProductBuyers(e) {
   if (e && e.target.id !== 'prod-buyers-modal') return;
@@ -839,12 +926,22 @@ function toggleStockOnly() {
 window.toggleStockOnly = toggleStockOnly;
 
 // ── 거래처 잔액 (잔액 컬렉션 사용 - 전체 기간 반영) ─
+let balanceItems = [];
+let balanceSort = { key: '잔액', dir: 'desc' };
+const BALANCE_SORT_TYPES = { 회사:'text', 잔액:'num', 잔액기준일:'date', 총매출:'num', 최종매출일:'date' };
+
+function setBalanceSort(key) {
+  balanceSort = toggleSort(balanceSort, key, BALANCE_SORT_TYPES[key]);
+  renderBalanceResult();
+}
+window.setBalanceSort = setBalanceSort;
+
 async function searchBalance() {
   const q = document.getElementById('bal-q').value.trim().toLowerCase();
   loading('balance-result');
-  
+
   const { collection, query, getDocs, orderBy, limit, where } = window.fbFuncs;
-  
+
   try {
     // 잔액 컬렉션 (미리 전체 기간으로 계산되어 저장됨) + 거래처 마스터 병렬 조회
     const balColl = collection(window.fbdb, '잔액');
@@ -853,14 +950,14 @@ async function searchBalance() {
       getDocs(query(balColl, orderBy('잔액', 'desc'), limit(1000))),
       getDocs(query(custColl, limit(2000)))
     ]);
-    
+
     // 거래처 마스터 → 회사명별 이름/전화 매핑
     const custMap = new Map();
     custSnap.docs.forEach(d => {
       const r = d.data();
       if (r.회사) custMap.set(r.회사, { 이름: r.이름 || '', 전화: r.전화1 || '' });
     });
-    
+
     let items = balSnap.docs.map(d => {
       const r = d.data();
       const info = custMap.get(r.회사) || {};
@@ -870,49 +967,61 @@ async function searchBalance() {
         전화: info.전화,
       };
     });
-    
+
     // 필터 (회사명 + 담당자 이름 검색)
-    if (q) items = items.filter(r => 
+    if (q) items = items.filter(r =>
       (r.회사||'').toLowerCase().includes(q) ||
       (r.이름||'').toLowerCase().includes(q)
     );
     if (unpaidOnly) items = items.filter(r => r.잔액 > 0);
-    
-    if (!items.length) { empty('balance-result'); return; }
-    
-    const rows = items.slice(0, 300).map(r => {
-      const cls = r.잔액 > 0 ? 'pos' : r.잔액 < 0 ? 'neg' : 'zero';
-      const safeName = (r.회사||'').replace(/'/g,"\\'");
-      const 이름표시 = r.이름 ? `<span style="font-size:11px;color:var(--text3);margin-left:6px">(${r.이름})</span>` : '';
-      return `<tr>
-        <td onclick="goTxnByCompany('${safeName}')" style="cursor:pointer" title="거래내역 보기">
-          <strong style="color:var(--blue)">${r.회사||''}</strong>${이름표시}
-          <span style="font-size:10px;color:var(--text3);margin-left:6px">📋</span>
-        </td>
-        <td class="num ${cls}" onclick="showBalanceDetail('${safeName}', ${r.총매출||0}, ${r.총수금||0}, ${r.잔액||0}, '${r.잔액기준일||''}', '${r.잔액기준계정||''}', ${r.합산잔액||0})" style="cursor:pointer" title="잔액 상세 보기">
-          <strong>${fmtNum(r.잔액)}</strong>
-          <span style="font-size:10px;color:var(--text3);margin-left:4px">🔍</span>
-        </td>
-        <td style="font-size:11px;color:var(--text3)">${r.잔액기준일||'-'}${r.잔액기준계정?' '+r.잔액기준계정:''}</td>
-        <td class="num hide-mobile">${fmt억(r.총매출)}</td>
-        <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.최종매출일||''}</td>
-      </tr>`;
-    }).join('');
-    
-    document.getElementById('balance-result').innerHTML = `
-      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
-        ${items.length}개 거래처 · 잔액은 최종 명세표 기준 · <span style="color:var(--blue)">거래처명</span>=거래내역 · <span style="color:var(--amber)">잔액</span>=상세보기
-      </div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>거래처 (담당자)</th><th class="num">잔액 ▼</th><th>기준 전표</th><th class="num hide-mobile">누적 매출</th><th class="hide-mobile">최종거래일</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>`;
+
+    balanceItems = items;
+    renderBalanceResult();
   } catch(e) {
     document.getElementById('balance-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
     console.error(e);
   }
 }
 window.searchBalance = searchBalance;
+
+function renderBalanceResult() {
+  if (!balanceItems.length) { empty('balance-result'); return; }
+  const items = sortBy(balanceItems, balanceSort, BALANCE_SORT_TYPES);
+
+  const rows = items.slice(0, 300).map(r => {
+    const cls = r.잔액 > 0 ? 'pos' : r.잔액 < 0 ? 'neg' : 'zero';
+    const safeName = (r.회사||'').replace(/'/g,"\\'");
+    const 이름표시 = r.이름 ? `<span style="font-size:11px;color:var(--text3);margin-left:6px">(${r.이름})</span>` : '';
+    return `<tr>
+      <td onclick="goTxnByCompany('${safeName}')" style="cursor:pointer" title="거래내역 보기">
+        <strong style="color:var(--blue)">${r.회사||''}</strong>${이름표시}
+        <span style="font-size:10px;color:var(--text3);margin-left:6px">📋</span>
+      </td>
+      <td class="num ${cls}" onclick="showBalanceDetail('${safeName}', ${r.총매출||0}, ${r.총수금||0}, ${r.잔액||0}, '${r.잔액기준일||''}', '${r.잔액기준계정||''}', ${r.합산잔액||0})" style="cursor:pointer" title="잔액 상세 보기">
+        <strong>${fmtNum(r.잔액)}</strong>
+        <span style="font-size:10px;color:var(--text3);margin-left:4px">🔍</span>
+      </td>
+      <td style="font-size:11px;color:var(--text3)">${r.잔액기준일||'-'}${r.잔액기준계정?' '+r.잔액기준계정:''}</td>
+      <td class="num hide-mobile">${fmt억(r.총매출)}</td>
+      <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.최종매출일||''}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('balance-result').innerHTML = `
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
+      ${items.length}개 거래처 · 잔액은 최종 명세표 기준 · 헤더 클릭시 정렬 · <span style="color:var(--blue)">거래처명</span>=거래내역 · <span style="color:var(--amber)">잔액</span>=상세보기
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        ${thSort('거래처 (담당자)','회사',balanceSort,'setBalanceSort')}
+        ${thSort('잔액','잔액',balanceSort,'setBalanceSort','num')}
+        ${thSort('기준 전표','잔액기준일',balanceSort,'setBalanceSort')}
+        ${thSort('누적 매출','총매출',balanceSort,'setBalanceSort','num hide-mobile')}
+        ${thSort('최종거래일','최종매출일',balanceSort,'setBalanceSort','hide-mobile')}
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
 
 function toggleUnpaid() {
   unpaidOnly = !unpaidOnly;
@@ -976,6 +1085,17 @@ function closeBalanceDetail(e) {
 window.closeBalanceDetail = closeBalanceDetail;
 
 // ── 거래내역 ──────────────────────────────────────
+let txnItems = [];
+let txnCtx = null;
+let txnSort = { key: '날짜', dir: 'desc' };
+const TXN_SORT_TYPES = { 날짜:'date', 회사:'text', 계정:'text', 품명:'text', 수량:'num', 단가:'num', 공급가액:'num' };
+
+function setTxnSort(key) {
+  txnSort = toggleSort(txnSort, key, TXN_SORT_TYPES[key]);
+  renderTxnResult();
+}
+window.setTxnSort = setTxnSort;
+
 async function searchTxn() {
   const company = document.getElementById('txn-company').value.trim();
   const product = document.getElementById('txn-product').value.trim().toLowerCase();
@@ -1064,65 +1184,84 @@ async function searchTxn() {
       showBalance = true;
     }
     
-    const rows = items.slice(0, 500).map(r => {
-      const tagCls = `tag-${r.계정}`;
-      const bal = balanceMap[r.전표번호];
-      const balCell = showBalance 
-        ? (bal!==undefined ? `<td class="num ${bal>0?'pos':bal<0?'neg':'zero'}"><strong>${fmtNum(bal)}</strong></td>` : `<td class="num" style="color:var(--text3)">-</td>`)
-        : '';
-      return `<tr>
-        <td style="color:var(--text3)">${r.날짜||''}</td>
-        <td><strong>${r.회사||''}</strong></td>
-        <td><span class="tag ${tagCls}">${r.계정||''}</span></td>
-        <td>${r.품명||'-'}</td>
-        <td class="num hide-mobile">${r.수량>0?fmtNum(r.수량):'-'}</td>
-        <td class="num hide-mobile">${r.단가>0?fmtNum(r.단가):'-'}</td>
-        <td class="num">${r.공급가액>0?fmtNum(r.공급가액):'-'}</td>
-        ${balCell}
-      </tr>`;
-    }).join('');
-    
-    const balHeader = showBalance ? '<th class="num">잔액</th>' : '';
-    
-    // 안내 메시지
-    let infoMsg = `${items.length}건`;
-    if (matchedCompanies.size > 1) {
-      infoMsg += ` · ${matchedCompanies.size}개 거래처 매칭 (정확한 이름 입력시 잔액 표시)`;
-    } else if (targetCompany && targetCompany !== company) {
-      infoMsg += ` · 매칭된 거래처: ${targetCompany}`;
-    }
-    
-    let finalBalanceCard = '';
-    if (finalBalance) {
-      const fb = +finalBalance.잔액 || 0;
-      const fbColor = fb > 0 ? 'var(--amber)' : fb < 0 ? 'var(--green)' : 'var(--text3)';
-      finalBalanceCard = `
-        <div class="card" style="margin-bottom:14px">
-          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-            <div>
-              <div style="font-size:13px;color:var(--text2);font-weight:600">${targetCompany} · 최종잔액 (미수금)</div>
-              <div style="font-size:11px;color:var(--text3);margin-top:4px">
-                ${finalBalance.잔액기준일 ? `${finalBalance.잔액기준일} ${finalBalance.잔액기준계정||''} 명세표 기준` : '기준 전표 없음'}
-              </div>
-            </div>
-            <div style="font-size:24px;font-weight:700;color:${fbColor}">${fmtNum(fb)}<span style="font-size:13px">원</span></div>
-          </div>
-        </div>`;
-    }
-
-    document.getElementById('txn-result').innerHTML = `
-      ${finalBalanceCard}
-      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${infoMsg}</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>날짜</th><th>거래처</th><th>구분</th><th>품명</th><th class="num hide-mobile">수량</th><th class="num hide-mobile">단가</th><th class="num">금액</th>${balHeader}</tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>`;
+    txnItems = items;
+    txnCtx = { showBalance, balanceMap, targetCompany, finalBalance, matchedCompanyCount: matchedCompanies.size, company };
+    renderTxnResult();
   } catch(e) {
     document.getElementById('txn-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
     console.error(e);
   }
 }
 window.searchTxn = searchTxn;
+
+function renderTxnResult() {
+  if (!txnItems.length || !txnCtx) { empty('txn-result'); return; }
+  const { showBalance, balanceMap, targetCompany, finalBalance, matchedCompanyCount, company } = txnCtx;
+  const items = sortBy(txnItems, txnSort, TXN_SORT_TYPES);
+
+  const rows = items.slice(0, 500).map(r => {
+    const tagCls = `tag-${r.계정}`;
+    const bal = balanceMap[r.전표번호];
+    const balCell = showBalance
+      ? (bal!==undefined ? `<td class="num ${bal>0?'pos':bal<0?'neg':'zero'}"><strong>${fmtNum(bal)}</strong></td>` : `<td class="num" style="color:var(--text3)">-</td>`)
+      : '';
+    return `<tr>
+      <td style="color:var(--text3)">${r.날짜||''}</td>
+      <td><strong>${r.회사||''}</strong></td>
+      <td><span class="tag ${tagCls}">${r.계정||''}</span></td>
+      <td>${r.품명||'-'}</td>
+      <td class="num hide-mobile">${r.수량>0?fmtNum(r.수량):'-'}</td>
+      <td class="num hide-mobile">${r.단가>0?fmtNum(r.단가):'-'}</td>
+      <td class="num">${r.공급가액>0?fmtNum(r.공급가액):'-'}</td>
+      ${balCell}
+    </tr>`;
+  }).join('');
+
+  const balHeader = showBalance ? '<th class="num">잔액</th>' : '';
+
+  // 안내 메시지
+  let infoMsg = `${txnItems.length}건`;
+  if (matchedCompanyCount > 1) {
+    infoMsg += ` · ${matchedCompanyCount}개 거래처 매칭 (정확한 이름 입력시 잔액 표시)`;
+  } else if (targetCompany && targetCompany !== company) {
+    infoMsg += ` · 매칭된 거래처: ${targetCompany}`;
+  }
+
+  let finalBalanceCard = '';
+  if (finalBalance) {
+    const fb = +finalBalance.잔액 || 0;
+    const fbColor = fb > 0 ? 'var(--amber)' : fb < 0 ? 'var(--green)' : 'var(--text3)';
+    finalBalanceCard = `
+      <div class="card" style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-size:13px;color:var(--text2);font-weight:600">${targetCompany} · 최종잔액 (미수금)</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px">
+              ${finalBalance.잔액기준일 ? `${finalBalance.잔액기준일} ${finalBalance.잔액기준계정||''} 명세표 기준` : '기준 전표 없음'}
+            </div>
+          </div>
+          <div style="font-size:24px;font-weight:700;color:${fbColor}">${fmtNum(fb)}<span style="font-size:13px">원</span></div>
+        </div>
+      </div>`;
+  }
+
+  document.getElementById('txn-result').innerHTML = `
+    ${finalBalanceCard}
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${infoMsg} · 헤더 클릭시 정렬</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        ${thSort('날짜','날짜',txnSort,'setTxnSort')}
+        ${thSort('거래처','회사',txnSort,'setTxnSort')}
+        ${thSort('구분','계정',txnSort,'setTxnSort')}
+        ${thSort('품명','품명',txnSort,'setTxnSort')}
+        ${thSort('수량','수량',txnSort,'setTxnSort','num hide-mobile')}
+        ${thSort('단가','단가',txnSort,'setTxnSort','num hide-mobile')}
+        ${thSort('금액','공급가액',txnSort,'setTxnSort','num')}
+        ${balHeader}
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
 
 // 거래내역 탭 첫 진입시 자동 표시: 당일 매출 기준, 당일 데이터가 아직 없으면 최근 매출일로 대체
 async function autoLoadTodayTxn() {
@@ -1330,6 +1469,18 @@ function setCategory(cat) {
 }
 window.setCategory = setCategory;
 
+let inactiveItems = [];
+let inactiveTotalUnpaid = 0;
+let inactiveCatBadges = '';
+let inactiveSort = { key: '미거래일수', dir: 'desc' };
+const INACTIVE_SORT_TYPES = { 회사:'text', 축종:'text', 미거래일수:'num', 최종매출일:'date', 잔액:'num', 전화:'text', 담당사원:'text' };
+
+function setInactiveSort(key) {
+  inactiveSort = toggleSort(inactiveSort, key, INACTIVE_SORT_TYPES[key]);
+  renderInactiveResult();
+}
+window.setInactiveSort = setInactiveSort;
+
 async function searchInactive() {
   loading('inactive-result');
   
@@ -1392,14 +1543,9 @@ async function searchInactive() {
       items = items.filter(r => r.축종 === inactiveCategory);
     }
     
-    // 미거래일수 큰 순 정렬
-    items.sort((a,b) => b.미거래일수 - a.미거래일수);
-    
-    if (!items.length) { empty('inactive-result'); return; }
-    
     // 통계 요약
-    const totalUnpaid = items.reduce((s,r) => s + r.잔액, 0);
-    
+    inactiveTotalUnpaid = items.reduce((s,r) => s + r.잔액, 0);
+
     // 축종별 집계
     const catStats = {};
     items.forEach(r => {
@@ -1407,8 +1553,34 @@ async function searchInactive() {
       catStats[r.축종].수 += 1;
       catStats[r.축종].금액 += r.잔액;
     });
-    
-    const rows = items.slice(0, 300).map(r => {
+    inactiveCatBadges = Object.entries(catStats)
+      .sort((a,b) => b[1].금액 - a[1].금액)
+      .map(([cat, s]) => {
+        const 축종Color = {
+          '축우':   '#7F77DD',
+          '양계':   '#f0a050',
+          '양돈':   '#e05555',
+          '양견':   '#e879b3',
+          '동물병원/유통': '#36c4a0',
+          '미분류': 'var(--text3)',
+        }[cat] || 'var(--text3)';
+        return `<span style="display:inline-block;margin-right:8px;padding:3px 10px;border-radius:12px;background:${축종Color}22;color:${축종Color};font-size:11px;font-weight:600">${cat} ${s.수}곳 · ${fmt억(s.금액)}</span>`;
+      }).join('');
+
+    inactiveItems = items;
+    renderInactiveResult();
+  } catch(e) {
+    document.getElementById('inactive-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+    console.error(e);
+  }
+}
+window.searchInactive = searchInactive;
+
+function renderInactiveResult() {
+  if (!inactiveItems.length) { empty('inactive-result'); return; }
+  const items = sortBy(inactiveItems, inactiveSort, INACTIVE_SORT_TYPES);
+
+  const rows = items.slice(0, 300).map(r => {
       const cls = r.잔액 > 0 ? 'pos' : r.잔액 < 0 ? 'neg' : 'zero';
       const 이름표시 = r.이름 ? `<span style="font-size:11px;color:var(--text3);margin-left:6px">(${r.이름})</span>` : '';
       const safeName = (r.회사||'').replace(/'/g,"\\'");
@@ -1449,53 +1621,41 @@ async function searchInactive() {
       </tr>`;
     }).join('');
     
-    // 축종별 요약 표시
-    const catBadges = Object.entries(catStats)
-      .sort((a,b) => b[1].금액 - a[1].금액)
-      .map(([cat, s]) => {
-        const 축종Color = {
-          '축우':   '#7F77DD',
-          '양계':   '#f0a050',
-          '양돈':   '#e05555',
-          '양견':   '#e879b3',
-          '동물병원/유통': '#36c4a0',
-          '미분류': 'var(--text3)',
-        }[cat] || 'var(--text3)';
-        return `<span style="display:inline-block;margin-right:8px;padding:3px 10px;border-radius:12px;background:${축종Color}22;color:${축종Color};font-size:11px;font-weight:600">${cat} ${s.수}곳 · ${fmt억(s.금액)}</span>`;
-      }).join('');
-    
-    document.getElementById('inactive-result').innerHTML = `
-      <div class="kpi-grid" style="margin-bottom:14px">
-        <div class="kpi a">
-          <div class="kpi-lbl">${inactiveDays}일 이상 미거래 (5만원 초과)</div>
-          <div class="kpi-val">${items.length}<span style="font-size:14px"> 개사</span></div>
-          <div class="kpi-sub">${inactiveCategory === 'all' ? '전체' : inactiveCategory}</div>
-        </div>
-        <div class="kpi b" style="grid-column:span 3">
-          <div class="kpi-lbl">회수 필요 총액</div>
-          <div class="kpi-val" style="color:var(--amber)">${fmtNum(totalUnpaid)}<span style="font-size:14px"> 원</span></div>
-          <div class="kpi-sub">${fmt억(totalUnpaid)}</div>
-        </div>
+  document.getElementById('inactive-result').innerHTML = `
+    <div class="kpi-grid" style="margin-bottom:14px">
+      <div class="kpi a">
+        <div class="kpi-lbl">${inactiveDays}일 이상 미거래 (5만원 초과)</div>
+        <div class="kpi-val">${items.length}<span style="font-size:14px"> 개사</span></div>
+        <div class="kpi-sub">${inactiveCategory === 'all' ? '전체' : inactiveCategory}</div>
       </div>
-      <div style="margin-bottom:12px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px">
-        ${catBadges || '<span style="color:var(--text3);font-size:11px">데이터 없음</span>'}
+      <div class="kpi b" style="grid-column:span 3">
+        <div class="kpi-lbl">회수 필요 총액</div>
+        <div class="kpi-val" style="color:var(--amber)">${fmtNum(inactiveTotalUnpaid)}<span style="font-size:14px"> 원</span></div>
+        <div class="kpi-sub">${fmt억(inactiveTotalUnpaid)}</div>
       </div>
-      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
-        ${items.length}개 거래처 · 5만원 이하 자동 제외 · 미거래일수 오래된 순 · 
-        <span style="color:#f0d050">60일↑</span> · 
-        <span style="color:var(--amber)">90일↑</span> · 
-        <span style="color:var(--red)">120일↑</span>
-      </div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>거래처 (담당자)</th><th>축종</th><th class="num">미거래 ▼</th><th>최종거래</th><th class="num">잔액</th><th class="hide-mobile">전화</th><th class="hide-mobile">담당사원</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>`;
-  } catch(e) {
-    document.getElementById('inactive-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
-    console.error(e);
-  }
+    </div>
+    <div style="margin-bottom:12px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px">
+      ${inactiveCatBadges || '<span style="color:var(--text3);font-size:11px">데이터 없음</span>'}
+    </div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
+      ${items.length}개 거래처 · 5만원 이하 자동 제외 · 헤더 클릭시 정렬 ·
+      <span style="color:#f0d050">60일↑</span> ·
+      <span style="color:var(--amber)">90일↑</span> ·
+      <span style="color:var(--red)">120일↑</span>
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        ${thSort('거래처 (담당자)','회사',inactiveSort,'setInactiveSort')}
+        ${thSort('축종','축종',inactiveSort,'setInactiveSort')}
+        ${thSort('미거래','미거래일수',inactiveSort,'setInactiveSort','num')}
+        ${thSort('최종거래','최종매출일',inactiveSort,'setInactiveSort')}
+        ${thSort('잔액','잔액',inactiveSort,'setInactiveSort','num')}
+        ${thSort('전화','전화',inactiveSort,'setInactiveSort','hide-mobile')}
+        ${thSort('담당사원','담당사원',inactiveSort,'setInactiveSort','hide-mobile')}
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
 }
-window.searchInactive = searchInactive;
 
 // ── 축종별 매출 순위 ──────────────────────────────
 let salesRankCategory = 'all';
@@ -1509,6 +1669,18 @@ function setSalesRankCategory(cat) {
   searchSalesRank();
 }
 window.setSalesRankCategory = setSalesRankCategory;
+
+let srItems = [];
+let srCatBadges = '';
+let srFilteredCount = 0;
+let srSort = { key: '총매출', dir: 'desc' };
+const SR_SORT_TYPES = { 회사:'text', 축종:'text', 총매출:'num', 잔액:'num', 최종매출일:'date' };
+
+function setSrSort(key) {
+  srSort = toggleSort(srSort, key, SR_SORT_TYPES[key]);
+  renderSalesRank();
+}
+window.setSrSort = setSrSort;
 
 async function searchSalesRank() {
   loading('salesrank-result');
@@ -1561,12 +1733,10 @@ async function searchSalesRank() {
       ? 전체목록
       : 전체목록.filter(r => r.축종 === salesRankCategory);
 
-    // 매출 많은 순 정렬 + 상위 N
+    // 매출 많은 순으로 상위 N 선정 (topN은 항상 누적매출 기준으로 뽑고, 뽑힌 안에서 원하는 열로 재정렬 가능)
     items.sort((a,b) => (b.총매출||0) - (a.총매출||0));
-    const 필터건수 = items.length;
-    items = items.slice(0, topN);
-
-    if (!items.length) { empty('salesrank-result'); return; }
+    srFilteredCount = items.length;
+    srItems = items.slice(0, topN);
 
     const 축종Color = {
       '축우':   '#7F77DD',
@@ -1577,48 +1747,14 @@ async function searchSalesRank() {
       '미분류': 'var(--text3)',
     };
 
-    const catBadges = Object.entries(catStats)
+    srCatBadges = Object.entries(catStats)
       .sort((a,b) => b[1].금액 - a[1].금액)
       .map(([cat, s]) => {
         const c = 축종Color[cat] || 'var(--text3)';
         return `<span onclick="setSalesRankCategory('${cat}')" style="cursor:pointer;display:inline-block;margin-right:8px;padding:3px 10px;border-radius:12px;background:${c}22;color:${c};font-size:11px;font-weight:600">${cat} ${s.수}곳 · ${fmt억(s.금액)}</span>`;
       }).join('');
 
-    const rows = items.map((r, i) => {
-      const safeName = (r.회사||'').replace(/'/g,"\\'");
-      const isManual = !!축종매핑[r.회사];
-      const c = 축종Color[r.축종] || 'var(--text3)';
-      const 이름표시 = r.이름 ? `<span style="font-size:11px;color:var(--text3);margin-left:6px">(${r.이름})</span>` : '';
-      const balCls = r.잔액 > 0 ? 'pos' : r.잔액 < 0 ? 'neg' : 'zero';
-      return `<tr>
-        <td class="num" style="color:var(--text3)">${i+1}</td>
-        <td onclick="goTxnByCompany('${safeName}')" style="cursor:pointer" title="거래내역 보기">
-          <strong style="color:var(--blue)">${r.회사||''}</strong>${이름표시}
-        </td>
-        <td>
-          <span onclick="editCategory('${safeName}')" title="클릭하여 축종 변경"
-            style="cursor:pointer;font-size:10px;padding:2px 6px;border-radius:8px;background:${c}33;color:${c};font-weight:600;border:1px solid ${isManual?c:'transparent'}">
-            ${r.축종}${isManual?' ✎':''}
-          </span>
-        </td>
-        <td class="num"><strong>${fmt억(r.총매출)}</strong></td>
-        <td class="num hide-mobile ${balCls}">${fmtNum(r.잔액)}</td>
-        <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.최종매출일||''}</td>
-        <td class="hide-mobile">${r.담당사원||''}</td>
-      </tr>`;
-    }).join('');
-
-    document.getElementById('salesrank-result').innerHTML = `
-      <div style="margin-bottom:12px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px">
-        ${catBadges || '<span style="color:var(--text3);font-size:11px">데이터 없음</span>'}
-      </div>
-      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
-        ${salesRankCategory === 'all' ? '전체' : salesRankCategory} · 매출 상위 ${items.length}곳 (해당 축종 ${필터건수}곳 중) · 축종 태그 클릭하여 지정
-      </div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>#</th><th>거래처 (담당자)</th><th>축종</th><th class="num">누적매출 ▼</th><th class="num hide-mobile">잔액</th><th class="hide-mobile">최종매출일</th><th class="hide-mobile">담당사원</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>`;
+    renderSalesRank();
   } catch(e) {
     document.getElementById('salesrank-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
     console.error(e);
@@ -1626,11 +1762,80 @@ async function searchSalesRank() {
 }
 window.searchSalesRank = searchSalesRank;
 
+function renderSalesRank() {
+  if (!srItems.length) { empty('salesrank-result'); return; }
+
+  const 축종Color = {
+    '축우':   '#7F77DD',
+    '양계':   '#f0a050',
+    '양돈':   '#e05555',
+    '양견':   '#e879b3',
+    '동물병원/유통': '#36c4a0',
+    '미분류': 'var(--text3)',
+  };
+
+  const items = sortBy(srItems, srSort, SR_SORT_TYPES);
+
+  const rows = items.map((r, i) => {
+    const safeName = (r.회사||'').replace(/'/g,"\\'");
+    const isManual = !!축종매핑[r.회사];
+    const c = 축종Color[r.축종] || 'var(--text3)';
+    const 이름표시 = r.이름 ? `<span style="font-size:11px;color:var(--text3);margin-left:6px">(${r.이름})</span>` : '';
+    const balCls = r.잔액 > 0 ? 'pos' : r.잔액 < 0 ? 'neg' : 'zero';
+    return `<tr>
+      <td class="num" style="color:var(--text3)">${i+1}</td>
+      <td onclick="goTxnByCompany('${safeName}')" style="cursor:pointer" title="거래내역 보기">
+        <strong style="color:var(--blue)">${r.회사||''}</strong>${이름표시}
+      </td>
+      <td>
+        <span onclick="editCategory('${safeName}')" title="클릭하여 축종 변경"
+          style="cursor:pointer;font-size:10px;padding:2px 6px;border-radius:8px;background:${c}33;color:${c};font-weight:600;border:1px solid ${isManual?c:'transparent'}">
+          ${r.축종}${isManual?' ✎':''}
+        </span>
+      </td>
+      <td class="num"><strong>${fmt억(r.총매출)}</strong></td>
+      <td class="num hide-mobile ${balCls}">${fmtNum(r.잔액)}</td>
+      <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.최종매출일||''}</td>
+      <td class="hide-mobile">${r.담당사원||''}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('salesrank-result').innerHTML = `
+    <div style="margin-bottom:12px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px">
+      ${srCatBadges || '<span style="color:var(--text3);font-size:11px">데이터 없음</span>'}
+    </div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
+      ${salesRankCategory === 'all' ? '전체' : salesRankCategory} · 매출 상위 ${items.length}곳 (해당 축종 ${srFilteredCount}곳 중) · 헤더 클릭시 정렬 · 축종 태그 클릭하여 지정
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        <th>#</th>
+        ${thSort('거래처 (담당자)','회사',srSort,'setSrSort')}
+        ${thSort('축종','축종',srSort,'setSrSort')}
+        ${thSort('누적매출','총매출',srSort,'setSrSort','num')}
+        ${thSort('잔액','잔액',srSort,'setSrSort','num hide-mobile')}
+        ${thSort('최종매출일','최종매출일',srSort,'setSrSort','hide-mobile')}
+        <th class="hide-mobile">담당사원</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+
 // ── 거래처 정보 ────────────────────────────────
+let infoItems = [];
+let infoSort = { key: '최종매출일', dir: 'desc' };
+const INFO_SORT_TYPES = { 회사:'text', 이름:'text', 전화1:'text', 분류:'text', 주소:'text', 담당사원:'text', 최종매출일:'date' };
+
+function setInfoSort(key) {
+  infoSort = toggleSort(infoSort, key, INFO_SORT_TYPES[key]);
+  renderInfoResult();
+}
+window.setInfoSort = setInfoSort;
+
 async function searchInfo() {
   const q = document.getElementById('info-q').value.trim().toLowerCase();
   loading('info-result');
-  
+
   const { collection, query, getDocs, limit } = window.fbFuncs;
   const custColl = collection(window.fbdb, '거래처');
   const balColl = collection(window.fbdb, '잔액');
@@ -1659,35 +1864,46 @@ async function searchInfo() {
       (r.이름||'').toLowerCase().includes(q)
     );
 
-    // 최근 매출 발생일 내림차순 정렬 (매출 이력 없는 거래처는 뒤로)
-    items.sort((a,b) => (b.최종매출일||'').localeCompare(a.최종매출일||''));
-
-    if (!items.length) { empty('info-result'); return; }
-
-    const rows = items.slice(0, 300).map(r => {
-      const safe = (r.회사||'').replace(/'/g,"\\'");
-      return `<tr onclick="showCompanyDetail('${safe}')" style="cursor:pointer" title="거래내역·잔액 보기">
-      <td><strong style="color:var(--blue)">${r.회사||''}</strong> <span style="font-size:10px;color:var(--text3)">🔍</span></td>
-      <td>${r.이름||''}</td>
-      <td>${r.전화1||''}</td>
-      <td class="hide-mobile">${r.분류||''}</td>
-      <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.주소||''}</td>
-      <td>${r.담당사원||''}</td>
-      <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.최종매출일||''}</td>
-    </tr>`;
-    }).join('');
-
-    document.getElementById('info-result').innerHTML = `
-      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${items.length}개 거래처 · 최근 매출일순 정렬 · 회사명/담당자명 검색 · 거래처 클릭시 거래내역·잔액</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>거래처</th><th>담당자</th><th>전화</th><th class="hide-mobile">분류</th><th class="hide-mobile">주소</th><th>담당사원</th><th class="hide-mobile">최근매출일</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>`;
+    infoItems = items;
+    renderInfoResult();
   } catch(e) {
     document.getElementById('info-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
   }
 }
 window.searchInfo = searchInfo;
+
+function renderInfoResult() {
+  if (!infoItems.length) { empty('info-result'); return; }
+  const items = sortBy(infoItems, infoSort, INFO_SORT_TYPES);
+
+  const rows = items.slice(0, 300).map(r => {
+    const safe = (r.회사||'').replace(/'/g,"\\'");
+    return `<tr onclick="showCompanyDetail('${safe}')" style="cursor:pointer" title="거래내역·잔액 보기">
+    <td><strong style="color:var(--blue)">${r.회사||''}</strong> <span style="font-size:10px;color:var(--text3)">🔍</span></td>
+    <td>${r.이름||''}</td>
+    <td>${r.전화1||''}</td>
+    <td class="hide-mobile">${r.분류||''}</td>
+    <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.주소||''}</td>
+    <td>${r.담당사원||''}</td>
+    <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.최종매출일||''}</td>
+  </tr>`;
+  }).join('');
+
+  document.getElementById('info-result').innerHTML = `
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${items.length}개 거래처 · 헤더 클릭시 정렬 · 회사명/담당자명 검색 · 거래처 클릭시 거래내역·잔액</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        ${thSort('거래처','회사',infoSort,'setInfoSort')}
+        ${thSort('담당자','이름',infoSort,'setInfoSort')}
+        ${thSort('전화','전화1',infoSort,'setInfoSort')}
+        ${thSort('분류','분류',infoSort,'setInfoSort','hide-mobile')}
+        ${thSort('주소','주소',infoSort,'setInfoSort','hide-mobile')}
+        ${thSort('담당사원','담당사원',infoSort,'setInfoSort')}
+        ${thSort('최근매출일','최종매출일',infoSort,'setInfoSort','hide-mobile')}
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
 
 // ── 거래처 상세 (잔액 + 최근 거래내역) 팝업 ─────────
 async function showCompanyDetail(company) {
