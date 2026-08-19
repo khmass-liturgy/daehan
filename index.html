@@ -634,7 +634,9 @@ async function searchStock() {
       const safe = (r.품명||'').replace(/'/g,"\\'");
       return `<tr>
         <td>${r.대분류||''}</td>
-        <td><strong>${r.품명||''}</strong></td>
+        <td onclick="showProductBuyers('${safe}')" style="cursor:pointer" title="이 제품을 구매한 거래처 보기">
+          <strong style="color:var(--blue)">${r.품명||''}</strong> <span style="font-size:10px;color:var(--text3)">🔍</span>
+        </td>
         <td>
           <span onclick="editProductSpecies('${safe}')" title="클릭하여 축종 지정"
             style="cursor:pointer;font-size:10px;padding:2px 7px;border-radius:8px;background:${spColor}22;color:${spColor};font-weight:600;border:1px solid ${sp!=='미지정'?spColor:'transparent'}">
@@ -712,14 +714,19 @@ async function searchCustProducts() {
     const 총품목 = items.length;
     const 총구매횟수 = details.length;
     
-    const rows = items.slice(0, 300).map(r => `<tr>
+    const rows = items.slice(0, 300).map(r => {
+      const safeP = (r.품명||'').replace(/'/g,"\\'");
+      return `<tr>
       <td>${r.대분류||''}</td>
-      <td><strong>${r.품명||''}</strong></td>
+      <td onclick="showProductBuyers('${safeP}')" style="cursor:pointer" title="이 제품을 구매한 거래처 보기">
+        <strong style="color:var(--blue)">${r.품명||''}</strong> <span style="font-size:10px;color:var(--text3)">🔍</span>
+      </td>
       <td class="num">${r.구매횟수}회</td>
       <td class="num">${fmtNum(r.총수량)}</td>
       <td class="num hide-mobile">${fmtNum(r.최근단가)}</td>
       <td style="font-size:11px;color:var(--text3)">${r.최근구매||''}</td>
-    </tr>`).join('');
+    </tr>`;
+    }).join('');
     
     document.getElementById('stock-result').innerHTML = `
       <div class="kpi-grid" style="margin-bottom:14px">
@@ -748,6 +755,81 @@ async function searchCustProducts() {
   }
 }
 window.searchCustProducts = searchCustProducts;
+
+// 제품별 구매 거래처 (품명 → 이 제품을 산 농가 목록) 팝업
+async function showProductBuyers(품명) {
+  const html = `
+    <div id="prod-buyers-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:400;display:flex;align-items:center;justify-content:center;padding:16px" onclick="closeProductBuyers(event)">
+      <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:14px;padding:22px;max-width:520px;width:100%;max-height:85vh;overflow-y:auto" onclick="event.stopPropagation()">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+          <div>
+            <div style="font-size:17px;font-weight:700">${품명}</div>
+            <div style="font-size:11px;color:var(--text3)" id="pb-sub">불러오는 중...</div>
+          </div>
+          <button onclick="closeProductBuyers()" style="background:var(--bg3);border:none;color:var(--text2);border-radius:8px;width:30px;height:30px;cursor:pointer;font-size:16px">✕</button>
+        </div>
+        <div id="pb-body"><div class="loading"><span class="spinner"></span>구매 거래처 조회 중...</div></div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+
+  const { collection, query, getDocs, where, limit } = window.fbFuncs;
+
+  try {
+    // 품명 단일 필드 일치 조건만 사용 (복합 색인 불필요) → 계정/정렬은 클라이언트에서 처리
+    const snap = await getDocs(query(collection(window.fbdb,'전표_세부'), where('품명','==',품명), limit(3000)));
+    const sales = snap.docs.map(d => d.data()).filter(r => r.계정 === '매출');
+
+    if (!sales.length) {
+      document.getElementById('pb-sub').textContent = '구매 이력 없음';
+      document.getElementById('pb-body').innerHTML = `<div class="empty">이 제품을 구매한 거래처가 없습니다<br><span style="font-size:11px">(최근 1년치 데이터 기준)</span></div>`;
+      return;
+    }
+
+    // 거래처별 집계
+    const map = new Map();
+    sales.forEach(r => {
+      const key = r.회사 || '(미상)';
+      const cur = map.get(key) || { 회사:key, 구매횟수:0, 총수량:0, 최근구매:'' };
+      cur.구매횟수 += 1;
+      cur.총수량 += (+r.수량||0);
+      if ((r.날짜||'') > cur.최근구매) cur.최근구매 = r.날짜 || '';
+      map.set(key, cur);
+    });
+
+    let farms = [...map.values()];
+    farms.sort((a,b) => b.구매횟수 - a.구매횟수);
+
+    document.getElementById('pb-sub').textContent = `${farms.length}개 거래처 구매 (최근 1년치 데이터 기준)`;
+
+    const rows = farms.slice(0, 200).map(r => {
+      const safe = (r.회사||'').replace(/'/g,"\\'");
+      return `<tr onclick="closeProductBuyers();goTxnByCompany('${safe}')" style="cursor:pointer" title="거래내역 보기">
+        <td><strong style="color:var(--blue)">${r.회사}</strong></td>
+        <td class="num">${r.구매횟수}회</td>
+        <td class="num">${fmtNum(r.총수량)}</td>
+        <td style="font-size:11px;color:var(--text3)">${r.최근구매}</td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('pb-body').innerHTML = `
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>거래처</th><th class="num">구매횟수 ▼</th><th class="num">총수량</th><th>최근구매일</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+  } catch(e) {
+    document.getElementById('pb-body').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+    console.error(e);
+  }
+}
+window.showProductBuyers = showProductBuyers;
+
+function closeProductBuyers(e) {
+  if (e && e.target.id !== 'prod-buyers-modal') return;
+  const m = document.getElementById('prod-buyers-modal');
+  if (m) m.remove();
+}
+window.closeProductBuyers = closeProductBuyers;
 
 function toggleStockOnly() {
   stockOnly = !stockOnly;
