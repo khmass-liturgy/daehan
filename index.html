@@ -416,7 +416,7 @@ function showTab(name) {
   if (name === 'inactive' && !document.querySelector('#inactive-result table')) searchInactive();
   if (name === 'salesrank' && !document.querySelector('#salesrank-result table')) searchSalesRank();
   if (name === 'balance' && !document.querySelector('#balance-result table')) searchBalance();
-  if (name === 'txn' && !document.querySelector('#txn-result table')) autoLoadTodayTxn();
+  if (name === 'txn' && !document.querySelector('#txn-result table') && !document.getElementById('txn-company').value) autoLoadTodayTxn();
   if (name === 'info' && !document.querySelector('#info-result table')) searchInfo();
 }
 window.showTab = showTab;
@@ -840,8 +840,8 @@ function toggleUnpaid() {
 window.toggleUnpaid = toggleUnpaid;
 
 function goTxnByCompany(name) {
-  showTab('txn');
   document.getElementById('txn-company').value = name;
+  showTab('txn');
   searchTxn();
 }
 window.goTxnByCompany = goTxnByCompany;
