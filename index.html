@@ -114,7 +114,7 @@ tr:hover td{background:var(--bg3)}
   </header>
 
   <nav>
-    <div class="nav-tab active" onclick="showTab('stock')">재고 조회</div>
+    <div class="nav-tab active" onclick="showTab('stock')">제품정보</div>
     <div class="nav-tab" onclick="showTab('balance')">거래처 잔액</div>
     <div class="nav-tab" onclick="showTab('salesrank')">매출 순위</div>
     <div class="nav-tab" onclick="showTab('txn')">거래내역</div>
@@ -193,6 +193,7 @@ tr:hover td{background:var(--bg3)}
       <div class="search-row">
         <input class="search-input" id="txn-company" placeholder="거래처명..." onkeydown="if(event.key==='Enter')searchTxn()">
         <input class="search-input" id="txn-product" placeholder="품명..." onkeydown="if(event.key==='Enter')searchTxn()">
+        <input type="date" class="search-input" id="txn-date" style="flex:0 0 auto" onchange="searchTxn()">
         <select class="filter" id="txn-acct" onchange="searchTxn()">
           <option value="">전체</option>
           <option value="매출">매출</option>
@@ -318,6 +319,7 @@ function fmt억(n) {
   return n.toLocaleString();
 }
 function fmtNum(n) { return (+n||0).toLocaleString(); }
+function todayStr() { const d = new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function loading(id) { document.getElementById(id).innerHTML = '<div class="loading"><span class="spinner"></span>클라우드 조회 중...</div>'; }
 function empty(id) { document.getElementById(id).innerHTML = '<div class="empty">검색 결과가 없습니다</div>'; }
 
@@ -413,7 +415,9 @@ function showTab(name) {
   });
   if (name === 'inactive' && !document.querySelector('#inactive-result table')) searchInactive();
   if (name === 'salesrank' && !document.querySelector('#salesrank-result table')) searchSalesRank();
-  if (name === 'txn' && !document.querySelector('#txn-result table') && !document.getElementById('txn-company').value) searchTxn();
+  if (name === 'balance' && !document.querySelector('#balance-result table')) searchBalance();
+  if (name === 'txn' && !document.querySelector('#txn-result table')) autoLoadTodayTxn();
+  if (name === 'info' && !document.querySelector('#info-result table')) searchInfo();
 }
 window.showTab = showTab;
 
@@ -836,8 +840,8 @@ function toggleUnpaid() {
 window.toggleUnpaid = toggleUnpaid;
 
 function goTxnByCompany(name) {
-  document.getElementById('txn-company').value = name;
   showTab('txn');
+  document.getElementById('txn-company').value = name;
   searchTxn();
 }
 window.goTxnByCompany = goTxnByCompany;
@@ -894,38 +898,45 @@ async function searchTxn() {
   const company = document.getElementById('txn-company').value.trim();
   const product = document.getElementById('txn-product').value.trim().toLowerCase();
   const acct    = document.getElementById('txn-acct').value;
-  const noFilter = !company && !product && !acct;
+  const date    = document.getElementById('txn-date').value;
+
+  if (!company && !product && !acct && !date) {
+    document.getElementById('txn-result').innerHTML = '<div class="empty">거래처, 품명, 구분, 날짜 중 하나 이상 선택하세요</div>';
+    return;
+  }
 
   loading('txn-result');
-  
+
   const { collection, query, getDocs, where, orderBy, limit } = window.fbFuncs;
   const coll = collection(window.fbdb, '전표_세부');
-  
+
   try {
     let items = [];
     let matchedCompanies = new Set();
-    
+
     if (company) {
       // 회사명 부분 일치 검색 (Firestore는 == 만 되므로 클라이언트 필터링)
-      // 1단계: 계정 필터가 있으면 그 조건으로만 조회, 없으면 전체 최근 순
+      // 1단계: 계정/날짜 필터가 있으면 그 조건으로 조회, 없으면 전체 최근 순
       let constraints = [];
       if (acct) constraints.push(where('계정', '==', acct));
+      if (date) constraints.push(where('날짜', '==', date));
       constraints.push(orderBy('날짜', 'desc'));
       constraints.push(limit(5000));
-      
+
       const snap = await getDocs(query(coll, ...constraints));
       const allDocs = snap.docs.map(d => d.data());
-      
+
       // 회사명 부분 일치 필터
       const kw = company.toLowerCase();
       items = allDocs.filter(r => (r.회사||'').toLowerCase().includes(kw));
       items.forEach(r => matchedCompanies.add(r.회사));
     } else {
-      // 회사 조건 없이 계정만 조회
+      // 회사 조건 없이 계정/날짜만 조회
       let constraints = [];
       if (acct) constraints.push(where('계정', '==', acct));
+      if (date) constraints.push(where('날짜', '==', date));
       constraints.push(orderBy('날짜', 'desc'));
-      constraints.push(limit(500));
+      constraints.push(limit(date ? 3000 : 500));
       const snap = await getDocs(query(coll, ...constraints));
       items = snap.docs.map(d => d.data());
     }
@@ -979,7 +990,7 @@ async function searchTxn() {
     const balHeader = showBalance ? '<th class="num">잔액</th>' : '';
     
     // 안내 메시지
-    let infoMsg = noFilter ? `최근 거래내역 ${items.length}건 (전체 최신순)` : `${items.length}건`;
+    let infoMsg = `${items.length}건`;
     if (matchedCompanies.size > 1) {
       infoMsg += ` · ${matchedCompanies.size}개 거래처 매칭 (정확한 이름 입력시 잔액 표시)`;
     } else if (targetCompany && targetCompany !== company) {
@@ -1017,6 +1028,21 @@ async function searchTxn() {
   }
 }
 window.searchTxn = searchTxn;
+
+// 거래내역 탭 첫 진입시 자동 표시: 당일 매출 기준, 당일 데이터가 아직 없으면 최근 매출일로 대체
+async function autoLoadTodayTxn() {
+  let dateToUse = todayStr();
+  try {
+    const { collection, query, getDocs, where, orderBy, limit } = window.fbFuncs;
+    const coll = collection(window.fbdb, '전표_세부');
+    const snap = await getDocs(query(coll, where('계정','==','매출'), orderBy('날짜','desc'), limit(1)));
+    if (!snap.empty && snap.docs[0].data().날짜) dateToUse = snap.docs[0].data().날짜;
+  } catch(e) { console.error(e); }
+  document.getElementById('txn-date').value = dateToUse;
+  document.getElementById('txn-acct').value = '매출';
+  searchTxn();
+}
+window.autoLoadTodayTxn = autoLoadTodayTxn;
 
 // ── 미거래 관리 ────────────────────────────────
 let inactiveDays = 60;
@@ -1503,23 +1529,38 @@ async function searchInfo() {
   loading('info-result');
   
   const { collection, query, getDocs, limit } = window.fbFuncs;
-  const coll = collection(window.fbdb, '거래처');
-  
+  const custColl = collection(window.fbdb, '거래처');
+  const balColl = collection(window.fbdb, '잔액');
+
   try {
-    const snap = await getDocs(query(coll, limit(2000)));
-    let items = snap.docs.map(d => d.data());
-    
+    const [custSnap, balSnap] = await Promise.all([
+      getDocs(query(custColl, limit(2000))),
+      getDocs(query(balColl, limit(2000)))
+    ]);
+
+    // 회사별 최종매출일 매핑
+    const lastSaleMap = new Map();
+    balSnap.docs.forEach(d => {
+      const r = d.data();
+      if (r.회사 && r.최종매출일) lastSaleMap.set(r.회사, r.최종매출일);
+    });
+
+    let items = custSnap.docs.map(d => {
+      const r = d.data();
+      return { ...r, 최종매출일: lastSaleMap.get(r.회사) || '' };
+    });
+
     // 회사명 또는 담당자 이름으로 검색
-    if (q) items = items.filter(r => 
+    if (q) items = items.filter(r =>
       (r.회사||'').toLowerCase().includes(q) ||
       (r.이름||'').toLowerCase().includes(q)
     );
-    
-    // 회사명 오름차순 정렬
-    items.sort((a,b) => (a.회사||'').localeCompare(b.회사||''));
-    
+
+    // 최근 매출 발생일 내림차순 정렬 (매출 이력 없는 거래처는 뒤로)
+    items.sort((a,b) => (b.최종매출일||'').localeCompare(a.최종매출일||''));
+
     if (!items.length) { empty('info-result'); return; }
-    
+
     const rows = items.slice(0, 300).map(r => {
       const safe = (r.회사||'').replace(/'/g,"\\'");
       return `<tr onclick="showCompanyDetail('${safe}')" style="cursor:pointer" title="거래내역·잔액 보기">
@@ -1529,13 +1570,14 @@ async function searchInfo() {
       <td class="hide-mobile">${r.분류||''}</td>
       <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.주소||''}</td>
       <td>${r.담당사원||''}</td>
+      <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.최종매출일||''}</td>
     </tr>`;
     }).join('');
-    
+
     document.getElementById('info-result').innerHTML = `
-      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${items.length}개 거래처 · 회사명/담당자명 검색 · 거래처 클릭시 거래내역·잔액</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${items.length}개 거래처 · 최근 매출일순 정렬 · 회사명/담당자명 검색 · 거래처 클릭시 거래내역·잔액</div>
       <div class="tbl-wrap"><table>
-        <thead><tr><th>거래처</th><th>담당자</th><th>전화</th><th class="hide-mobile">분류</th><th class="hide-mobile">주소</th><th>담당사원</th></tr></thead>
+        <thead><tr><th>거래처</th><th>담당자</th><th>전화</th><th class="hide-mobile">분류</th><th class="hide-mobile">주소</th><th>담당사원</th><th class="hide-mobile">최근매출일</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`;
   } catch(e) {
