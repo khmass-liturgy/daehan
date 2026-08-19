@@ -191,7 +191,7 @@ tr:hover td{background:var(--bg3)}
 
     <div id="tab-txn" style="display:none">
       <div class="search-row">
-        <input class="search-input" id="txn-company" placeholder="거래처명..." onkeydown="if(event.key==='Enter')searchTxn()">
+        <input class="search-input" id="txn-company" placeholder="거래처명..." oninput="clearTxnAutoFilters()" onkeydown="if(event.key==='Enter')searchTxn()">
         <input class="search-input" id="txn-product" placeholder="품명..." onkeydown="if(event.key==='Enter')searchTxn()">
         <input type="date" class="search-input" id="txn-date" style="flex:0 0 auto" onchange="searchTxn()">
         <select class="filter" id="txn-acct" onchange="searchTxn()">
@@ -1043,6 +1043,14 @@ async function autoLoadTodayTxn() {
   searchTxn();
 }
 window.autoLoadTodayTxn = autoLoadTodayTxn;
+
+// 거래처명을 직접 입력하기 시작하면, 자동조회가 걸어둔 날짜/구분 필터를 해제
+// (그대로 두면 "특정 날짜+매출"로 몰래 좁혀진 채 검색돼 결과가 0건으로 보이는 문제가 있었음)
+function clearTxnAutoFilters() {
+  document.getElementById('txn-date').value = '';
+  document.getElementById('txn-acct').value = '';
+}
+window.clearTxnAutoFilters = clearTxnAutoFilters;
 
 // ── 미거래 관리 ────────────────────────────────
 let inactiveDays = 60;
