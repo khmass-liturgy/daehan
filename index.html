@@ -92,6 +92,8 @@ tr:hover td{background:var(--bg3)}
 
 .pos{color:var(--amber)}.neg{color:var(--green)}.zero{color:var(--text3)}
 @media(max-width:600px){.hide-mobile{display:none}}
+td.bigo{font-size:11px;color:var(--text2);white-space:normal;max-width:220px;line-height:1.45}
+th.bigo{min-width:110px}
 </style>
 </head>
 <body>
@@ -193,7 +195,6 @@ tr:hover td{background:var(--bg3)}
       <div class="search-row">
         <input class="search-input" id="txn-company" placeholder="거래처명..." oninput="clearTxnAutoFilters()" onkeydown="if(event.key==='Enter')searchTxn()">
         <input class="search-input" id="txn-product" placeholder="품명..." onkeydown="if(event.key==='Enter')searchTxn()">
-        <input type="date" class="search-input" id="txn-date" style="flex:0 0 auto" onchange="searchTxn()">
         <select class="filter" id="txn-acct" onchange="searchTxn()">
           <option value="">전체</option>
           <option value="매출">매출</option>
@@ -202,6 +203,20 @@ tr:hover td{background:var(--bg3)}
           <option value="지급">지급</option>
         </select>
         <button class="search-btn" onclick="searchTxn()">검색</button>
+      </div>
+      <div class="search-row">
+        <span style="display:flex;gap:8px;align-items:center;flex:0 0 auto">
+          <span style="font-size:12px;color:var(--text2)">기간</span>
+          <input type="date" class="search-input" id="txn-from" style="flex:0 0 auto" onchange="searchTxn()">
+          <span style="color:var(--text3)">~</span>
+          <input type="date" class="search-input" id="txn-to" style="flex:0 0 auto" onchange="searchTxn()">
+        </span>
+        <button class="toggle-btn" onclick="setTxnRange('thismonth')">이번달</button>
+        <button class="toggle-btn" onclick="setTxnRange('lastmonth')">지난달</button>
+        <button class="toggle-btn" onclick="setTxnRange('3m')">최근 3개월</button>
+        <button class="toggle-btn" onclick="setTxnRange('year')">올해</button>
+        <button class="toggle-btn" onclick="setTxnRange('clear')">기간 해제</button>
+        <button class="search-btn" id="txn-excel-btn" onclick="exportTxnExcel()" style="background:var(--green)">엑셀 내보내기</button>
       </div>
       <div id="txn-result"></div>
     </div>
@@ -253,6 +268,9 @@ tr:hover td{background:var(--bg3)}
     </div>
   </main>
 </div>
+
+<!-- 엑셀 내보내기 (SheetJS) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <!-- Firebase SDK -->
 <script type="module">
@@ -319,6 +337,7 @@ function fmt억(n) {
   return n.toLocaleString();
 }
 function fmtNum(n) { return (+n||0).toLocaleString(); }
+function esc(s) { return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function todayStr() { const d = new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function loading(id) { document.getElementById(id).innerHTML = '<div class="loading"><span class="spinner"></span>클라우드 조회 중...</div>'; }
 function empty(id) { document.getElementById(id).innerHTML = '<div class="empty">검색 결과가 없습니다</div>'; }
@@ -1088,7 +1107,102 @@ window.closeBalanceDetail = closeBalanceDetail;
 let txnItems = [];
 let txnCtx = null;
 let txnSort = { key: '날짜', dir: 'desc' };
-const TXN_SORT_TYPES = { 날짜:'date', 회사:'text', 계정:'text', 품명:'text', 수량:'num', 단가:'num', 공급가액:'num' };
+const TXN_SORT_TYPES = { 날짜:'date', 회사:'text', 계정:'text', 품명:'text', 수량:'num', 단가:'num', 공급가액:'num', 비고:'text' };
+
+// 거래명세표 비고: 품목별 비고 + 전표 전체 비고를 함께 보여준다
+function txnBigo(r) {
+  const 품목 = (r.비고 || '').trim();
+  const 전표 = (r.전표비고 || '').trim();
+  return { 품목, 전표: (전표 && 전표 !== 품목) ? 전표 : '' };
+}
+function bigoCell(r) {
+  const { 품목, 전표 } = txnBigo(r);
+  if (!품목 && !전표) return '';
+  const a = 품목 ? `<div>${esc(품목)}</div>` : '';
+  const b = 전표 ? `<div style="color:var(--text3)" title="전표 전체 비고">📋 ${esc(전표)}</div>` : '';
+  return a + b;
+}
+
+// 기간 프리셋
+function setTxnRange(kind) {
+  const d = new Date();
+  const iso = x => x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
+  let from = '', to = '';
+  if (kind === 'thismonth') {
+    from = iso(new Date(d.getFullYear(), d.getMonth(), 1));
+    to   = iso(new Date(d.getFullYear(), d.getMonth()+1, 0));
+  } else if (kind === 'lastmonth') {
+    from = iso(new Date(d.getFullYear(), d.getMonth()-1, 1));
+    to   = iso(new Date(d.getFullYear(), d.getMonth(), 0));
+  } else if (kind === '3m') {
+    from = iso(new Date(d.getFullYear(), d.getMonth()-2, 1));
+    to   = iso(d);
+  } else if (kind === 'year') {
+    from = iso(new Date(d.getFullYear(), 0, 1));
+    to   = iso(new Date(d.getFullYear(), 11, 31));
+  }
+  document.getElementById('txn-from').value = from;
+  document.getElementById('txn-to').value = to;
+  searchTxn();
+}
+window.setTxnRange = setTxnRange;
+
+// 조회된 내역 전체를 엑셀(.xlsx)로 저장 (화면은 500행만 그리지만 파일에는 전부 담는다)
+function exportTxnExcel() {
+  if (!txnItems.length || !txnCtx) {
+    alert('먼저 조회를 해주세요. 내보낼 내역이 없습니다.');
+    return;
+  }
+  if (typeof XLSX === 'undefined') {
+    alert('엑셀 모듈을 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.');
+    return;
+  }
+  const { showBalance, balanceMap, targetCompany, from, to } = txnCtx;
+  const items = sortBy(txnItems, txnSort, TXN_SORT_TYPES);
+
+  const head = ['날짜','거래처','구분','품명','단위','수량','단가','공급가액','세액'];
+  if (showBalance) head.push('잔액');
+  head.push('비고','전표비고','전표번호');
+
+  const aoa = [head];
+  items.forEach(r => {
+    const { 품목, 전표 } = txnBigo(r);
+    const row = [
+      r.날짜 || '', r.회사 || '', r.계정 || '', r.품명 || '', r.단위 || '',
+      +r.수량 || 0, +r.단가 || 0, +r.공급가액 || 0, +r.세액 || 0
+    ];
+    if (showBalance) {
+      const b = balanceMap[r.전표번호];
+      row.push(b === undefined ? '' : b);
+    }
+    row.push(품목, 전표, r.전표번호 || '');
+    aoa.push(row);
+  });
+
+  // 합계 행
+  const sum = items.reduce((a, r) => a + (+r.공급가액 || 0), 0);
+  const sumRow = new Array(head.length).fill('');
+  sumRow[0] = '합계';
+  sumRow[head.indexOf('공급가액')] = sum;
+  aoa.push([], sumRow);
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = head.map(h =>
+    ({ 날짜:12, 거래처:18, 구분:10, 품명:26, 단위:8, 수량:9, 단가:11,
+       공급가액:13, 세액:10, 잔액:13, 비고:24, 전표비고:24, 전표번호:18 }[h] || 12))
+    .map(w => ({ wch: w }));
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '거래내역');
+
+  const part = [];
+  if (targetCompany) part.push(targetCompany);
+  if (from || to) part.push(`${from || '처음'}~${to || '끝'}`);
+  else part.push(todayStr());
+  const name = ('거래내역_' + part.join('_') + '.xlsx').replace(/[\\/:*?"<>|]/g, '_');
+  XLSX.writeFile(wb, name);
+}
+window.exportTxnExcel = exportTxnExcel;
 
 function setTxnSort(key) {
   txnSort = toggleSort(txnSort, key, TXN_SORT_TYPES[key]);
@@ -1100,10 +1214,15 @@ async function searchTxn() {
   const company = document.getElementById('txn-company').value.trim();
   const product = document.getElementById('txn-product').value.trim().toLowerCase();
   const acct    = document.getElementById('txn-acct').value;
-  const date    = document.getElementById('txn-date').value;
+  const from    = document.getElementById('txn-from').value;
+  const to      = document.getElementById('txn-to').value;
 
-  if (!company && !product && !acct && !date) {
-    document.getElementById('txn-result').innerHTML = '<div class="empty">거래처, 품명, 구분, 날짜 중 하나 이상 선택하세요</div>';
+  if (!company && !product && !acct && !from && !to) {
+    document.getElementById('txn-result').innerHTML = '<div class="empty">거래처, 품명, 구분, 기간 중 하나 이상 선택하세요</div>';
+    return;
+  }
+  if (from && to && from > to) {
+    document.getElementById('txn-result').innerHTML = '<div class="empty">시작일이 종료일보다 늦습니다</div>';
     return;
   }
 
@@ -1111,6 +1230,14 @@ async function searchTxn() {
 
   const { collection, query, getDocs, where, orderBy, limit } = window.fbFuncs;
   const coll = collection(window.fbdb, '전표_세부');
+
+  // 날짜는 'YYYY-MM-DD' 문자열이라 사전순 비교가 곧 날짜 비교
+  const dateWhere = () => {
+    const c = [];
+    if (from) c.push(where('날짜', '>=', from));
+    if (to)   c.push(where('날짜', '<=', to));
+    return c;
+  };
 
   try {
     let items = [];
@@ -1121,7 +1248,7 @@ async function searchTxn() {
       try {
         let exactConstraints = [where('회사', '==', company)];
         if (acct) exactConstraints.push(where('계정', '==', acct));
-        if (date) exactConstraints.push(where('날짜', '==', date));
+        exactConstraints.push(...dateWhere());
         exactConstraints.push(orderBy('날짜', 'desc'));
         exactConstraints.push(limit(5000));
         const exactSnap = await getDocs(query(coll, ...exactConstraints));
@@ -1134,7 +1261,7 @@ async function searchTxn() {
         // (주의: 최근 5000건 범위 밖의 오래된 거래는 이 경로로는 찾지 못할 수 있음)
         let constraints = [];
         if (acct) constraints.push(where('계정', '==', acct));
-        if (date) constraints.push(where('날짜', '==', date));
+        constraints.push(...dateWhere());
         constraints.push(orderBy('날짜', 'desc'));
         constraints.push(limit(5000));
 
@@ -1146,12 +1273,12 @@ async function searchTxn() {
         items.forEach(r => matchedCompanies.add(r.회사));
       }
     } else {
-      // 회사 조건 없이 계정/날짜만 조회
+      // 회사 조건 없이 계정/기간만 조회
       let constraints = [];
       if (acct) constraints.push(where('계정', '==', acct));
-      if (date) constraints.push(where('날짜', '==', date));
+      constraints.push(...dateWhere());
       constraints.push(orderBy('날짜', 'desc'));
-      constraints.push(limit(date ? 3000 : 500));
+      constraints.push(limit((from || to) ? 10000 : 500));
       const snap = await getDocs(query(coll, ...constraints));
       items = snap.docs.map(d => d.data());
     }
@@ -1185,7 +1312,7 @@ async function searchTxn() {
     }
     
     txnItems = items;
-    txnCtx = { showBalance, balanceMap, targetCompany, finalBalance, matchedCompanyCount: matchedCompanies.size, company };
+    txnCtx = { showBalance, balanceMap, targetCompany, finalBalance, matchedCompanyCount: matchedCompanies.size, company, from, to };
     renderTxnResult();
   } catch(e) {
     document.getElementById('txn-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
@@ -1214,6 +1341,7 @@ function renderTxnResult() {
       <td class="num hide-mobile">${r.단가>0?fmtNum(r.단가):'-'}</td>
       <td class="num">${r.공급가액>0?fmtNum(r.공급가액):'-'}</td>
       ${balCell}
+      <td class="bigo">${bigoCell(r)}</td>
     </tr>`;
   }).join('');
 
@@ -1258,6 +1386,7 @@ function renderTxnResult() {
         ${thSort('단가','단가',txnSort,'setTxnSort','num hide-mobile')}
         ${thSort('금액','공급가액',txnSort,'setTxnSort','num')}
         ${balHeader}
+        ${thSort('비고','비고',txnSort,'setTxnSort','bigo')}
       </tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`;
@@ -1272,7 +1401,8 @@ async function autoLoadTodayTxn() {
     const snap = await getDocs(query(coll, where('계정','==','매출'), orderBy('날짜','desc'), limit(1)));
     if (!snap.empty && snap.docs[0].data().날짜) dateToUse = snap.docs[0].data().날짜;
   } catch(e) { console.error(e); }
-  document.getElementById('txn-date').value = dateToUse;
+  document.getElementById('txn-from').value = dateToUse;
+  document.getElementById('txn-to').value = dateToUse;
   document.getElementById('txn-acct').value = '매출';
   searchTxn();
 }
@@ -1281,7 +1411,8 @@ window.autoLoadTodayTxn = autoLoadTodayTxn;
 // 거래처명을 직접 입력하기 시작하면, 자동조회가 걸어둔 날짜/구분 필터를 해제
 // (그대로 두면 "특정 날짜+매출"로 몰래 좁혀진 채 검색돼 결과가 0건으로 보이는 문제가 있었음)
 function clearTxnAutoFilters() {
-  document.getElementById('txn-date').value = '';
+  document.getElementById('txn-from').value = '';
+  document.getElementById('txn-to').value = '';
   document.getElementById('txn-acct').value = '';
 }
 window.clearTxnAutoFilters = clearTxnAutoFilters;
