@@ -511,9 +511,17 @@ async function saveProductSpecies(품명, 축종) {
 }
 window.saveProductSpecies = saveProductSpecies;
 
+// 품명 기반 자동 분류 (수동 매핑이 없을 때만 사용)
+function classifyProduct(품명) {
+  if (!품명) return '미지정';
+  if (품명.includes('IB') || 품명.includes('ND') || 품명.includes('AI') || 품명.includes('양계')) return '양계';
+  if (품명.includes('주사') || 품명.includes('양돈')) return '양돈';
+  return '미지정';
+}
+
 // 제품 축종 편집 팝업
 function editProductSpecies(품명) {
-  const 현재 = 제품축종[품명] || '미지정';
+  const 현재 = 제품축종[품명] || classifyProduct(품명);
   const options = ['양계','양돈','축우','공통'];
   const 색상map = { '양계':'#f0a050','양돈':'#e05555','축우':'#7F77DD','공통':'#36c4a0','미지정':'var(--text3)' };
   const safe = 품명.replace(/'/g,"\\'");
@@ -665,12 +673,12 @@ async function searchStock() {
     // 제품 축종 필터
     if (stockSpecies !== 'all') {
       items = items.filter(r => {
-        const sp = 제품축종[r.품명] || '미지정';
+        const sp = 제품축종[r.품명] || classifyProduct(r.품명);
         return sp === stockSpecies;
       });
     }
 
-    items.forEach(r => { r._축종 = 제품축종[r.품명] || '미지정'; });
+    items.forEach(r => { r._축종 = 제품축종[r.품명] || classifyProduct(r.품명); });
 
     stockItems = items;
     renderStockResult();
