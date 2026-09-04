@@ -1051,6 +1051,7 @@ window.toggleUnpaid = toggleUnpaid;
 
 function goTxnByCompany(name) {
   document.getElementById('txn-company').value = name;
+  clearTxnAutoFilters();  // 이전 탭 방문에서 남은 '오늘/매출' 필터를 지워 전체 거래유형(입금 포함)이 보이게 함
   showTab('txn');
   searchTxn();
 }
@@ -1243,7 +1244,39 @@ async function searchTxn() {
     let items = [];
     let matchedCompanies = new Set();
 
-    if (company) {
+    // 수금(입금)/지급(출금)은 전표_세부엔 라인이 없고 전표_묶음 헤더에만 기록됨
+    const CASH_ACCTS = ['수금', '지급'];
+    const cashRow = (r) => ({
+      날짜: r.날짜, 회사: r.회사, 계정: r.계정,
+      품명: r.결재수단 ? `${r.계정} (${r.결재수단})` : r.계정,
+      수량: 0, 단가: 0,
+      공급가액: r.계정 === '수금' ? (+r.입금액 || 0) : (+r.출금액 || 0),
+      전표번호: r.전표번호
+    });
+
+    if (CASH_ACCTS.includes(acct)) {
+      // 계정을 수금/지급으로 직접 선택한 경우: 전표_묶음 헤더에서 조회
+      const headColl = collection(window.fbdb, '전표_묶음');
+      let hdocs = [];
+      if (company) {
+        const exactSnap = await getDocs(query(headColl, where('회사', '==', company), limit(5000)));
+        hdocs = exactSnap.docs.map(d => d.data());
+        if (!hdocs.length) {
+          const snap = await getDocs(query(headColl, limit(5000)));
+          const kw = company.toLowerCase();
+          hdocs = snap.docs.map(d => d.data()).filter(r => (r.회사||'').toLowerCase().includes(kw));
+        }
+      } else {
+        const snap = await getDocs(query(headColl, limit(5000)));
+        hdocs = snap.docs.map(d => d.data());
+      }
+      items = hdocs
+        .filter(r => r.계정 === acct)
+        .filter(r => (!from || r.날짜 >= from) && (!to || r.날짜 <= to))
+        .map(cashRow)
+        .sort((a,b) => (b.날짜||'').localeCompare(a.날짜||''));
+      items.forEach(r => matchedCompanies.add(r.회사));
+    } else if (company) {
       // 1단계: 정확한 거래처명으로 직접 조회 시도 (오래된 거래도 누락 없이 전부 잡힘)
       try {
         let exactConstraints = [where('회사', '==', company)];
@@ -1282,12 +1315,12 @@ async function searchTxn() {
       const snap = await getDocs(query(coll, ...constraints));
       items = snap.docs.map(d => d.data());
     }
-    
+
     // 품명 필터
     if (product) items = items.filter(r => (r.품명||'').toLowerCase().includes(product));
-    
+
     if (!items.length) { empty('txn-result'); return; }
-    
+
     // 회사별 잔액 계산 (매칭된 회사가 정확히 1곳일 때만)
     let showBalance = false;
     let balanceMap = {};
@@ -1309,8 +1342,18 @@ async function searchTxn() {
       });
       if (!bsnap.empty) finalBalance = bsnap.docs[0].data();
       showBalance = true;
+
+      // 계정 필터가 없을 때(전체 보기)만 수금/지급 내역을 함께 섞어서 보여줌
+      if (!product && !acct) {
+        const cashRows = hsnap.docs
+          .map(d => d.data())
+          .filter(r => CASH_ACCTS.includes(r.계정))
+          .filter(r => (!from || r.날짜 >= from) && (!to || r.날짜 <= to))
+          .map(cashRow);
+        items = items.concat(cashRows);
+      }
     }
-    
+
     txnItems = items;
     txnCtx = { showBalance, balanceMap, targetCompany, finalBalance, matchedCompanyCount: matchedCompanies.size, company, from, to };
     renderTxnResult();
