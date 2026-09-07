@@ -664,7 +664,7 @@ async function loadMfgList() {
     const mfgs = new Set();
     snap.docs.forEach(d => {
       const m = d.data().대분류;
-      if (m) mfgs.add(m);
+      if (m && m !== 'A') mfgs.add(m);
     });
     const sorted = [...mfgs].sort((a,b) => a.localeCompare(b));
     const select = document.getElementById('stock-mfg');
@@ -701,6 +701,9 @@ async function searchStock() {
     }
 
     let items = snap.docs.map(d => d.data());
+
+    // 대분류 'A' (미분류) 품목은 목록에서 제외
+    items = items.filter(r => r.대분류 !== 'A');
 
     // 제조사 필터 (제조사별 모드)
     if (mfg) {
