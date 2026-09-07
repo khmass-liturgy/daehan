@@ -119,6 +119,7 @@ th.bigo{min-width:110px}
     <div class="nav-tab active" onclick="showTab('stock')">제품정보</div>
     <div class="nav-tab" onclick="showTab('balance')">거래처 잔액</div>
     <div class="nav-tab" onclick="showTab('salesrank')">매출 순위</div>
+    <div class="nav-tab" onclick="showTab('panal')">제품분석</div>
     <div class="nav-tab" onclick="showTab('txn')">거래내역</div>
     <div class="nav-tab" onclick="showTab('inactive')">미거래 관리</div>
     <div class="nav-tab" onclick="showTab('info')">거래처 정보</div>
@@ -189,6 +190,26 @@ th.bigo{min-width:110px}
         </select>
       </div>
       <div id="salesrank-result"></div>
+    </div>
+
+    <div id="tab-panal" style="display:none">
+      <div class="search-row">
+        <button class="toggle-btn on" id="pa-sp-all" onclick="setPaSpecies('all')">축종 전체</button>
+        <button class="toggle-btn" id="pa-sp-양계" onclick="setPaSpecies('양계')">🐔 양계</button>
+        <button class="toggle-btn" id="pa-sp-양돈" onclick="setPaSpecies('양돈')">🐷 양돈</button>
+        <button class="toggle-btn" id="pa-sp-축우" onclick="setPaSpecies('축우')">🐄 축우</button>
+        <button class="toggle-btn" id="pa-sp-공통" onclick="setPaSpecies('공통')">공통</button>
+        <button class="toggle-btn" id="pa-sp-미지정" onclick="setPaSpecies('미지정')">미지정</button>
+      </div>
+      <div class="search-row">
+        <select class="filter" id="pa-topn" onchange="renderProdAnalysis()">
+          <option value="20">상위 20개</option>
+          <option value="50" selected>상위 50개</option>
+          <option value="100">상위 100개</option>
+          <option value="99999">전체</option>
+        </select>
+      </div>
+      <div id="panal-result"></div>
     </div>
 
     <div id="tab-txn" style="display:none">
@@ -452,14 +473,15 @@ window.closeUploadDetail = closeUploadDetail;
 
 // ── 탭 ───────────────────────────────────────────
 function showTab(name) {
-  ['stock','balance','salesrank','txn','inactive','info','qia'].forEach(t => {
+  ['stock','balance','salesrank','panal','txn','inactive','info','qia'].forEach(t => {
     document.getElementById('tab-'+t).style.display = t === name ? '' : 'none';
   });
   document.querySelectorAll('.nav-tab').forEach((el,i) => {
-    el.classList.toggle('active', ['stock','balance','salesrank','txn','inactive','info','qia'][i] === name);
+    el.classList.toggle('active', ['stock','balance','salesrank','panal','txn','inactive','info','qia'][i] === name);
   });
   if (name === 'inactive' && !document.querySelector('#inactive-result table')) searchInactive();
   if (name === 'salesrank' && !document.querySelector('#salesrank-result table')) searchSalesRank();
+  if (name === 'panal' && !document.querySelector('#panal-result table')) searchProdAnalysis();
   if (name === 'balance' && !document.querySelector('#balance-result table')) searchBalance();
   if (name === 'txn' && !document.querySelector('#txn-result table') && !document.getElementById('txn-company').value) autoLoadTodayTxn();
   if (name === 'info' && !document.querySelector('#info-result table')) searchInfo();
@@ -2002,6 +2024,187 @@ function renderSalesRank() {
       <tbody>${rows}</tbody>
     </table></div>`;
 }
+
+// ── 제품분석 (품목별 매출 순위) ──────────────────
+// 최근 1년 매출 세부내역을 품명 기준으로 집계해 매출금액 상위 품목,
+// 현재재고, 이 품목을 가장 많이 사들인 거래처를 함께 보여준다.
+let paSpecies = 'all';
+let paRawProducts = [];   // 축종 필터 적용 전, 매출금액 내림차순 전체 집계 결과
+let paCatBadges = '';
+let paFilteredCount = 0;
+let paItems = [];
+let paSort = { key: '매출금액', dir: 'desc' };
+const PA_SORT_TYPES = { 대분류:'text', 품명:'text', 축종:'text', 매출금액:'num', 판매수량:'num', 현재재고:'num', 최다구매거래처:'text' };
+const PA_SPECIES_COLOR = { '양계':'#f0a050', '양돈':'#e05555', '축우':'#7F77DD', '공통':'#36c4a0', '미지정':'var(--text3)' };
+// 최다 판매 품목의 재고가 이 범위(개)로 떨어지면 "주문 필요"로 알려준다
+const PA_STOCK_ALERT_MIN = 10, PA_STOCK_ALERT_MAX = 20;
+
+function setPaSpecies(sp) {
+  paSpecies = sp;
+  ['all','양계','양돈','축우','공통','미지정'].forEach(c => {
+    const btn = document.getElementById('pa-sp-'+c);
+    if (btn) btn.classList.toggle('on', c === sp);
+  });
+  renderProdAnalysis();
+}
+window.setPaSpecies = setPaSpecies;
+
+function setPaSort(key) {
+  paSort = toggleSort(paSort, key, PA_SORT_TYPES[key]);
+  renderProdAnalysis();
+}
+window.setPaSort = setPaSort;
+
+async function searchProdAnalysis() {
+  loading('panal-result');
+  const { collection, query, getDocs, where, orderBy, limit } = window.fbFuncs;
+
+  try {
+    await loadProductSpecies();  // 제품축종 수동 매핑 캐시 최신화
+
+    const [salesSnap, prodSnap] = await Promise.all([
+      getDocs(query(collection(window.fbdb,'전표_세부'), where('계정','==','매출'), orderBy('날짜','desc'), limit(10000))),
+      getDocs(query(collection(window.fbdb,'제품'), limit(1200)))
+    ]);
+
+    // 제품 정보 맵 (품명 → 제조사 / 현재재고)
+    const prodInfo = new Map();
+    prodSnap.docs.forEach(d => {
+      const r = d.data();
+      if (r.품명) prodInfo.set(r.품명, { 대분류: r.대분류 || '', 현재재고: +r.현재재고 || 0 });
+    });
+
+    // 품명별 집계: 매출금액 / 판매수량 / 거래처별 구매수량·횟수
+    const map = new Map();
+    salesSnap.docs.forEach(d => {
+      const r = d.data();
+      const 품명 = r.품명;
+      if (!품명) return;
+      const cur = map.get(품명) || { 품명, 매출금액: 0, 판매수량: 0, 거래처맵: new Map() };
+      cur.매출금액 += (+r.공급가액 || 0);
+      cur.판매수량 += (+r.수량 || 0);
+      if (r.회사) {
+        const cm = cur.거래처맵;
+        const c = cm.get(r.회사) || { 수량: 0, 횟수: 0 };
+        c.수량 += (+r.수량 || 0);
+        c.횟수 += 1;
+        cm.set(r.회사, c);
+      }
+      map.set(품명, cur);
+    });
+
+    // 품목별 최종 데이터 구성 (거래처별 구매수량이 가장 많은 곳 = "제일 많이 사용한 거래처")
+    const 전체목록 = [...map.values()].map(r => {
+      const info = prodInfo.get(r.품명) || {};
+      const 축종 = 제품축종[r.품명] || classifyProduct(r.품명);
+      let 최다구매거래처 = '', 최다구매수량 = 0, 최다구매횟수 = 0;
+      for (const [회사, c] of r.거래처맵) {
+        if (c.수량 > 최다구매수량) { 최다구매거래처 = 회사; 최다구매수량 = c.수량; 최다구매횟수 = c.횟수; }
+      }
+      const 현재재고 = info.현재재고 ?? 0;
+      return {
+        품명: r.품명,
+        대분류: info.대분류 || '',
+        축종,
+        매출금액: r.매출금액,
+        판매수량: r.판매수량,
+        현재재고,
+        최다구매거래처,
+        최다구매수량,
+        최다구매횟수,
+        재고주의: 현재재고 >= PA_STOCK_ALERT_MIN && 현재재고 <= PA_STOCK_ALERT_MAX,
+      };
+    }).sort((a,b) => b.매출금액 - a.매출금액);
+
+    // 축종별 집계 뱃지 (필터 적용 전 전체 기준)
+    const catStats = {};
+    전체목록.forEach(r => {
+      catStats[r.축종] = catStats[r.축종] || { 수: 0, 금액: 0 };
+      catStats[r.축종].수 += 1;
+      catStats[r.축종].금액 += r.매출금액;
+    });
+    paCatBadges = Object.entries(catStats)
+      .sort((a,b) => b[1].금액 - a[1].금액)
+      .map(([cat, s]) => {
+        const c = PA_SPECIES_COLOR[cat] || 'var(--text3)';
+        return `<span onclick="setPaSpecies('${cat}')" style="cursor:pointer;display:inline-block;margin-right:8px;padding:3px 10px;border-radius:12px;background:${c}22;color:${c};font-size:11px;font-weight:600">${cat} ${s.수}개 · ${fmt억(s.금액)}</span>`;
+      }).join('');
+
+    paRawProducts = 전체목록;
+    renderProdAnalysis();
+  } catch(e) {
+    document.getElementById('panal-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+    console.error(e);
+  }
+}
+window.searchProdAnalysis = searchProdAnalysis;
+
+function renderProdAnalysis() {
+  if (!paRawProducts.length) { empty('panal-result'); return; }
+  const topN = +document.getElementById('pa-topn').value || 50;
+
+  const filtered = paSpecies === 'all' ? paRawProducts : paRawProducts.filter(r => r.축종 === paSpecies);
+  paFilteredCount = filtered.length;
+  if (!filtered.length) { empty('panal-result'); return; }
+
+  // 순위는 매출금액 기준(=filtered 원래 순서)으로 고정해두고, 사용자가 다른 열로
+  // 정렬해도 "매출 몇 위 품목인지"가 바뀌어 보이지 않도록 한다
+  const ranked = filtered.slice(0, topN).map((r, i) => ({ ...r, _순위: i + 1 }));
+  paItems = sortBy(ranked, paSort, PA_SORT_TYPES);
+
+  const alertItems = ranked.filter(r => r.재고주의);
+
+  const rows = paItems.map(r => {
+    const safeName = (r.품명||'').replace(/'/g,"\\'");
+    const safeBuyer = (r.최다구매거래처||'').replace(/'/g,"\\'");
+    const c = PA_SPECIES_COLOR[r.축종] || 'var(--text3)';
+    const stockStyle = r.재고주의 ? 'color:var(--amber);font-weight:700' : (r.현재재고<=0 ? 'color:var(--red)' : '');
+    const stockBadge = r.재고주의 ? '<br><span class="tag" style="background:var(--amber)22;color:var(--amber)">⚠ 주문 필요</span>' : '';
+    const buyerCell = r.최다구매거래처
+      ? `<span style="cursor:pointer;color:var(--blue)" onclick="goTxnByCompany('${safeBuyer}')" title="거래내역 보기"><strong>${r.최다구매거래처}</strong></span>
+         <div style="font-size:10px;color:var(--text3)">${fmtNum(r.최다구매수량)}개 · ${r.최다구매횟수}회</div>`
+      : '<span style="color:var(--text3)">-</span>';
+    return `<tr>
+      <td class="num" style="color:var(--text3)">${r._순위}</td>
+      <td class="hide-mobile">${r.대분류}</td>
+      <td><strong style="cursor:pointer;color:var(--blue)" onclick="showProductBuyers('${safeName}')" title="구매 거래처 전체 보기">${r.품명}</strong></td>
+      <td><span class="tag" style="background:${c}22;color:${c}">${r.축종}</span></td>
+      <td class="num"><strong>${fmt억(r.매출금액)}</strong></td>
+      <td class="num hide-mobile">${fmtNum(r.판매수량)}</td>
+      <td class="num" style="${stockStyle}">${fmtNum(r.현재재고)}${stockBadge}</td>
+      <td>${buyerCell}</td>
+    </tr>`;
+  }).join('');
+
+  const alertBanner = alertItems.length ? `
+    <div class="card" style="margin-bottom:14px;border-color:var(--amber)">
+      <div style="font-size:13px;font-weight:700;color:var(--amber);margin-bottom:6px">⚠ 재고 확인 필요 (10~20개 남음) · ${alertItems.length}개 품목</div>
+      <div style="font-size:12px;color:var(--text2)">${alertItems.map(r => `${r.품명} (${fmtNum(r.현재재고)}개)`).join(' · ')}</div>
+    </div>` : '';
+
+  document.getElementById('panal-result').innerHTML = `
+    <div style="margin-bottom:12px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px">
+      ${paCatBadges || '<span style="color:var(--text3);font-size:11px">데이터 없음</span>'}
+    </div>
+    ${alertBanner}
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
+      ${paSpecies === 'all' ? '전체' : paSpecies} · 매출 상위 ${paItems.length}개 (해당 축종 ${paFilteredCount}개 중) · 최근 1년 매출 기준 · 헤더 클릭시 정렬 · 품명 클릭시 구매처 전체 보기
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        <th>#</th>
+        <th class="hide-mobile">제조사</th>
+        ${thSort('품명','품명',paSort,'setPaSort')}
+        ${thSort('축종','축종',paSort,'setPaSort')}
+        ${thSort('매출금액','매출금액',paSort,'setPaSort','num')}
+        ${thSort('판매수량','판매수량',paSort,'setPaSort','num hide-mobile')}
+        ${thSort('현재재고','현재재고',paSort,'setPaSort','num')}
+        <th>최다구매거래처</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+window.renderProdAnalysis = renderProdAnalysis;
 
 // ── 거래처 정보 ────────────────────────────────
 let infoItems = [];
