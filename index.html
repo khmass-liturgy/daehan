@@ -124,6 +124,7 @@ th.bigo{min-width:110px}
     <div class="nav-tab" onclick="showTab('inactive')">미거래 관리</div>
     <div class="nav-tab" onclick="showTab('info')">거래처 정보</div>
     <div class="nav-tab" onclick="showTab('qia')">동물약품 검색</div>
+    <div class="nav-tab" onclick="showTab('wd')">휴약기간</div>
   </nav>
 
   <main>
@@ -286,6 +287,29 @@ th.bigo{min-width:110px}
       </div>
       <div style="font-size:11px;color:var(--text3);margin-bottom:14px">농림축산검역본부(QIA) 동물용의약품통합정보시스템 공식 데이터를 실시간으로 조회합니다 · 오타나 초성이 섞여도 비슷한 이름을 찾아드려요 (예: '이버ㅁㅌ')</div>
       <div id="qia-result"></div>
+    </div>
+
+    <div id="tab-wd" style="display:none">
+      <div class="search-row">
+        <button class="toggle-btn on" id="wd-sp-all" onclick="setWdSpecies('all')">축종 전체</button>
+        <button class="toggle-btn" id="wd-sp-양계" onclick="setWdSpecies('양계')">🐔 양계</button>
+        <button class="toggle-btn" id="wd-sp-양돈" onclick="setWdSpecies('양돈')">🐷 양돈</button>
+        <button class="toggle-btn" id="wd-sp-축우" onclick="setWdSpecies('축우')">🐄 축우</button>
+        <button class="toggle-btn" id="wd-sp-공통" onclick="setWdSpecies('공통')">공통</button>
+        <button class="toggle-btn" id="wd-sp-미지정" onclick="setWdSpecies('미지정')">미지정</button>
+      </div>
+      <div class="search-row">
+        <input class="search-input" id="wd-q" placeholder="품명 검색 (비워두면 축종 내 전체)..." onkeydown="if(event.key==='Enter')searchWd()">
+        <button class="toggle-btn on" id="wd-stock-btn" onclick="toggleWdStockOnly()">재고있음만</button>
+        <select class="filter" id="wd-limit">
+          <option value="20">최대 20개</option>
+          <option value="40" selected>최대 40개</option>
+          <option value="80">최대 80개</option>
+        </select>
+        <button class="search-btn" onclick="searchWd()">휴약기간 조회</button>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:14px">우리가 취급하는 제품명으로 QIA 공식 데이터를 찾아 휴약기간을 함께 보여드립니다 · 제품명 표기가 QIA 등록명과 달라 일부는 자동 매칭되지 않을 수 있어요 (그런 경우 "직접 검색" 버튼 이용)</div>
+      <div id="wd-result"></div>
     </div>
   </main>
 </div>
@@ -473,11 +497,11 @@ window.closeUploadDetail = closeUploadDetail;
 
 // ── 탭 ───────────────────────────────────────────
 function showTab(name) {
-  ['stock','balance','salesrank','panal','txn','inactive','info','qia'].forEach(t => {
+  ['stock','balance','salesrank','panal','txn','inactive','info','qia','wd'].forEach(t => {
     document.getElementById('tab-'+t).style.display = t === name ? '' : 'none';
   });
   document.querySelectorAll('.nav-tab').forEach((el,i) => {
-    el.classList.toggle('active', ['stock','balance','salesrank','panal','txn','inactive','info','qia'][i] === name);
+    el.classList.toggle('active', ['stock','balance','salesrank','panal','txn','inactive','info','qia','wd'][i] === name);
   });
   if (name === 'inactive' && !document.querySelector('#inactive-result table')) searchInactive();
   if (name === 'salesrank' && !document.querySelector('#salesrank-result table')) searchSalesRank();
@@ -2581,7 +2605,24 @@ window.loadMoreQia = loadMoreQia;
 function renderQiaResult() {
   if (!qiaRows.length) { empty('qia-result'); return; }
 
-  const rows = qiaRows.map(r => `<tr>
+  const rows = qiaRows.map((r, i) => {
+    let wdCell;
+    if (r.품목구분 && r.품목구분.includes('외품')) {
+      wdCell = '<span style="color:var(--text3);font-size:11px">해당없음</span>';
+    } else if (r._wdStatus === 'loading') {
+      wdCell = '<span class="spinner" style="width:12px;height:12px;margin:0"></span>';
+    } else if (r._wdStatus === 'done') {
+      wdCell = r._wdErr
+        ? '<span style="color:var(--red);font-size:11px">조회 오류</span>'
+        : (r._휴약기간
+            ? `<span style="font-size:12px;font-weight:700">${r._휴약기간}</span>`
+            : '<span style="color:var(--amber);font-size:11px">표기 확인 필요</span>');
+    } else if (r.링크) {
+      wdCell = `<button class="toggle-btn" style="padding:2px 8px;font-size:10px" onclick="loadQiaWithdrawal(${i})">조회</button>`;
+    } else {
+      wdCell = '<span style="color:var(--text3)">-</span>';
+    }
+    return `<tr>
     <td>${r.링크 ? `<a href="${r.링크}" target="_blank" rel="noopener" style="color:var(--blue);font-weight:600">${r.제품명||''} ↗</a>` : `<strong>${r.제품명||''}</strong>`}</td>
     <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.제품영문명||''}</td>
     <td>${r.업체명||''}</td>
@@ -2589,7 +2630,9 @@ function renderQiaResult() {
     <td class="hide-mobile">${r.주성분||''}</td>
     <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.허가일||''}</td>
     <td class="hide-mobile">${r.제조수입||''}</td>
-  </tr>`).join('');
+    <td>${wdCell}</td>
+  </tr>`;
+  }).join('');
 
   const hasMore = !qiaFuzzy && qiaRows.length < qiaTotal;
   const moreBtn = hasMore
@@ -2610,10 +2653,302 @@ function renderQiaResult() {
     ${fuzzyBanner}
     <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${infoLine}</div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th>제품명</th><th class="hide-mobile">영문명</th><th>업체명</th><th>구분</th><th class="hide-mobile">주성분</th><th class="hide-mobile">허가일</th><th class="hide-mobile">제조/수입</th></tr></thead>
+      <thead><tr><th>제품명</th><th class="hide-mobile">영문명</th><th>업체명</th><th>구분</th><th class="hide-mobile">주성분</th><th class="hide-mobile">허가일</th><th class="hide-mobile">제조/수입</th><th>휴약기간</th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>
     ${moreBtn}`;
+}
+
+// 동물약품 검색 결과 한 건의 휴약기간을 클릭시 개별 조회 (우리가 취급하지 않는
+// 제품이라도 QIA 검색 결과에 있기만 하면 바로 확인할 수 있도록)
+async function loadQiaWithdrawal(i) {
+  const r = qiaRows[i];
+  if (!r || !r.링크 || r._wdStatus) return;
+  r._wdStatus = 'loading';
+  renderQiaResult();
+  try {
+    const res = await fetch(r.링크);
+    const html = await res.text();
+    r._휴약기간 = wdExtractPeriod(html);
+  } catch(e) {
+    r._휴약기간 = '';
+    r._wdErr = true;
+  }
+  r._wdStatus = 'done';
+  renderQiaResult();
+}
+window.loadQiaWithdrawal = loadQiaWithdrawal;
+
+// QIA 검색 탭으로 이동해 특정 검색어로 바로 조회 (자동매칭 실패시 수동 확인용)
+function jumpToQiaSearch(term) {
+  showTab('qia');
+  setQiaMode('name');
+  // 우리 제품명에는 단위/용량/처방 표기가 붙어있어 그대로 넘기면 QIA 검색(유사검색 포함)에서도
+  // 못 찾는 경우가 많다 → 포장정보를 걷어낸 핵심 이름으로 검색해준다
+  document.getElementById('qia-q').value = wdStripPackaging(term);
+  searchQia();
+}
+window.jumpToQiaSearch = jumpToQiaSearch;
+
+// ── 동물용의약품 휴약기간 (축종별 · 우리 취급 제품 기준) ─────
+// 우리 제품명은 표기가 제각각(단위/용량/처방 태그 등)이라 QIA 등록명과
+// 그대로 일치하지 않는 경우가 많다. 포장정보를 걷어낸 검색어로 QIA를
+// 조회하고, 편집거리 유사도로 가장 비슷한 품목을 찾아 상세페이지에서
+// "OO. 휴약기간" 항목을 파싱해 보여준다. 완전자동 매칭이 불가능한
+// 케이스는 "직접 검색" 버튼으로 동물약품 검색 탭에 넘겨 사람이 확인한다.
+let wdSpecies = 'all';
+let wdStockOnly = true;
+let wdRawProducts = [];         // 축종/재고 필터 적용 전 전체 제품 목록 (제품 컬렉션)
+let wdItems = [];               // 현재 화면에 표시 중인 목록 (필터+개수제한 적용)
+const wdCache = new Map();      // 품명 → 조회 결과 캐시 (세션 내 재사용, 중복 QIA 요청 방지)
+const WD_SIM_THRESHOLD = 0.5;   // 이 유사도 미만이면 "매칭 실패"로 처리
+
+function setWdSpecies(sp) {
+  wdSpecies = sp;
+  ['all','양계','양돈','축우','공통','미지정'].forEach(c => {
+    const btn = document.getElementById('wd-sp-'+c);
+    if (btn) btn.classList.toggle('on', c === sp);
+  });
+  if (wdRawProducts.length) renderWdList();
+}
+window.setWdSpecies = setWdSpecies;
+
+function toggleWdStockOnly() {
+  wdStockOnly = !wdStockOnly;
+  document.getElementById('wd-stock-btn').classList.toggle('on', wdStockOnly);
+  if (wdRawProducts.length) renderWdList();
+}
+window.toggleWdStockOnly = toggleWdStockOnly;
+
+// 포장/용량 정보를 걷어내 QIA 검색에 적합한 핵심 제품명을 뽑아낸다
+function wdStripPackaging(name) {
+  let s = ' ' + (name || '') + ' ';
+  s = s.replace(/\([^)]*\)/g, ' ');
+  const UNIT = 'kg|g|mg|ml|ML|㎖|L|리터|톤|두|수|정|포|캡슐|병|cc|CC|%|분';
+  const unitRe = new RegExp('[-\\s]*[\\d,]+(?:\\.\\d+)?\\s*(?:' + UNIT + ')(?![가-힣a-zA-Z0-9])', 'g');
+  let prev;
+  do { prev = s; s = s.replace(unitRe, ' '); } while (s !== prev);
+  s = s.replace(/-?\s*(처방|보조|외품|의약외품|의약품)(?![가-힣])/g, ' ');
+  s = s.replace(/^\s*\d+\s*주\s+/, ' ');
+  s = s.replace(/[-\s]+/g, ' ').trim();
+  return s || (name || '').trim();
+}
+
+// QIA 상세페이지 HTML에서 "OO. 휴약기간" 섹션들을 찾아 텍스트로 합친다
+function wdExtractPeriod(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  // 문서마다 단락 클래스가 다르다(indent0 / title 등 혼용) → 전체 <p> 를 훑는다
+  const paras = [...doc.querySelectorAll('p')];
+  // 소제목 표기가 문서마다 다르다: "바. 휴약기간" / "4) 휴약기간" / "4. 휴약기간" 모두 존재
+  const isHeading = t => /^(?:[가-힣]\s*\.\s*\S|\(?\d+\)\s*\S|\d+\s*\.\s*\S)/.test(t);
+  // "바. 휴약기간" 처럼 소제목 한 줄로 끝나기도 하고, "1) 휴약기간 : 없음" / "바. 휴약기간 - 돼지 : 14일"
+  // 처럼 소제목 뒤에 값이 바로 붙어 한 줄에 나오기도 한다 → 접두어만 매치해 나머지를 분리
+  // "...휴약기간을 준수하지..." 같은 [권고사항] 속 문장은 조사가 바로 붙으므로
+  // "휴약기간" 뒤에 한글이 곧장 이어지면(=소제목이 아니라 문장 일부) 제외한다
+  const WD_PREFIX = /^(?:[가-힣]\s*\.\s*|\(?\d+\)\s*|\d+\s*\.\s*)?휴약기간(?![가-힣])\s*[:：\-－—]?\s*/;
+  const sections = [];
+  for (let i = 0; i < paras.length; i++) {
+    const t = paras[i].textContent.replace(/\s+/g, ' ').trim();
+    const m = t.match(WD_PREFIX);
+    if (!m) continue;
+    const inline = t.slice(m[0].length).trim();
+    const lines = inline ? [inline] : [];
+    for (let j = i + 1; j < paras.length; j++) {
+      const u = paras[j].textContent.replace(/\s+/g, ' ').trim();
+      if (!u) continue;
+      if (isHeading(u) || u.startsWith('[')) break;
+      lines.push(u);
+    }
+    if (lines.length) sections.push(lines.join(' / '));
+  }
+  return sections.length ? [...new Set(sections)].join('  ·  ') : '';
+}
+
+// 품명 하나에 대해 QIA 최적 매칭을 찾고, 의약품이면 휴약기간까지 조회
+async function wdLookupOne(품명) {
+  if (wdCache.has(품명)) return wdCache.get(품명);
+
+  const clean = wdStripPackaging(품명);
+  const terms = clean === 품명 ? [품명] : [clean, 품명];
+  const collected = new Map();
+  for (const term of terms) {
+    if (!term) continue;
+    try {
+      const params = new URLSearchParams({ page: '1', searchDivision: 'detail', itemName: term });
+      const res = await fetch(QIA_BASE + '/searchMedicine?' + params.toString());
+      if (!res.ok) continue;
+      const { rows } = parseQiaHtml(await res.text());
+      rows.forEach(r => { const k = r.링크 || r.제품명; if (!collected.has(k)) collected.set(k, r); });
+    } catch(e) { /* 후보 하나 실패해도 계속 진행 */ }
+  }
+
+  const scored = [...collected.values()]
+    .map(r => ({ ...r, _sim: qiaSimilarity(clean, r.제품명) }))
+    .sort((a,b) => b._sim - a._sim);
+  const best = scored[0];
+
+  let result;
+  if (!best || best._sim < WD_SIM_THRESHOLD) {
+    result = { status: 'notfound' };
+  } else if (best.품목구분 && best.품목구분.includes('외품')) {
+    result = { status: 'nowd', qia제품명: best.제품명, 링크: best.링크, 업체명: best.업체명, 품목구분: best.품목구분, 유사도: best._sim };
+  } else {
+    try {
+      const detailRes = await fetch(best.링크);
+      const html = await detailRes.text();
+      const period = wdExtractPeriod(html);
+      result = period
+        ? { status: 'ok', qia제품명: best.제품명, 링크: best.링크, 업체명: best.업체명, 품목구분: best.품목구분, 유사도: best._sim, 휴약기간: period }
+        : { status: 'noinfo', qia제품명: best.제품명, 링크: best.링크, 업체명: best.업체명, 품목구분: best.품목구분, 유사도: best._sim };
+    } catch(e) {
+      result = { status: 'error', qia제품명: best.제품명, 링크: best.링크, 유사도: best._sim };
+    }
+  }
+  wdCache.set(품명, result);
+  return result;
+}
+
+// 우리 제품 목록(제품 컬렉션) 로드 — QIA 호출 없이 빠르게 필터링 가능한 형태로 보관
+async function loadWdProducts() {
+  const { collection, query, getDocs, limit } = window.fbFuncs;
+  await loadProductSpecies();
+  const snap = await getDocs(query(collection(window.fbdb, '제품'), limit(1200)));
+  wdRawProducts = snap.docs.map(d => {
+    const r = d.data();
+    return {
+      품명: r.품명 || '',
+      대분류: r.대분류 || '',
+      현재재고: +r.현재재고 || 0,
+      축종: 제품축종[r.품명] || classifyProduct(r.품명),
+    };
+  }).filter(r => r.품명);
+}
+
+function wdFilteredList() {
+  const q = document.getElementById('wd-q').value.trim().toLowerCase();
+  let items = wdRawProducts;
+  if (wdSpecies !== 'all') items = items.filter(r => r.축종 === wdSpecies);
+  if (wdStockOnly) items = items.filter(r => r.현재재고 > 0);
+  if (q) items = items.filter(r => r.품명.toLowerCase().includes(q));
+  return items.sort((a,b) => b.현재재고 - a.현재재고 || a.품명.localeCompare(b.품명));
+}
+
+// 축종/검색어/재고 필터만 바뀌었을 때 (QIA 재조회 없이) 캐시된 결과로 다시 그리기
+function renderWdList() {
+  const filtered = wdFilteredList();
+  const limitN = +document.getElementById('wd-limit').value || 40;
+  wdItems = filtered.slice(0, limitN).map(r => ({ ...r, ...(wdCache.get(r.품명) || { status: 'pending' }) }));
+  renderWdTable(filtered.length);
+}
+
+async function searchWd() {
+  document.getElementById('wd-result').innerHTML = '<div class="loading"><span class="spinner"></span>제품 목록 불러오는 중...</div>';
+  try {
+    if (!wdRawProducts.length) await loadWdProducts();
+  } catch(e) {
+    document.getElementById('wd-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+    return;
+  }
+
+  const filtered = wdFilteredList();
+  if (!filtered.length) { empty('wd-result'); return; }
+
+  const limitN = +document.getElementById('wd-limit').value || 40;
+  const targets = filtered.slice(0, limitN);
+  wdItems = targets.map(r => ({ ...r, ...(wdCache.get(r.품명) || { status: 'loading' }) }));
+  renderWdTable(filtered.length);
+
+  // QIA 조회는 서버 부담을 줄이기 위해 순차 처리 + 진행중인 항목만 다시 그린다
+  for (let i = 0; i < targets.length; i++) {
+    const 품명 = targets[i].품명;
+    if (wdCache.has(품명)) continue;
+    try {
+      const r = await wdLookupOne(품명);
+      const idx = wdItems.findIndex(x => x.품명 === 품명);
+      if (idx !== -1) wdItems[idx] = { ...wdItems[idx], ...r };
+    } catch(e) {
+      const idx = wdItems.findIndex(x => x.품명 === 품명);
+      if (idx !== -1) wdItems[idx] = { ...wdItems[idx], status: 'error' };
+    }
+    renderWdTable(filtered.length);
+  }
+}
+window.searchWd = searchWd;
+
+const WD_SPECIES_COLOR = { '양계':'#f0a050', '양돈':'#e05555', '축우':'#7F77DD', '공통':'#36c4a0', '미지정':'var(--text3)' };
+const WD_STATUS_LABEL = {
+  pending: { txt: '조회 대기', cls: 'var(--text3)' },
+  loading: { txt: '조회 중...', cls: 'var(--text3)' },
+  ok: { txt: '', cls: '' },
+  nowd: { txt: '해당없음 (의약외품)', cls: 'var(--text3)' },
+  noinfo: { txt: '표기 확인 필요 (본문에서 미검출)', cls: 'var(--amber)' },
+  notfound: { txt: 'QIA 자동매칭 실패', cls: 'var(--red)' },
+  error: { txt: '조회 오류', cls: 'var(--red)' },
+};
+
+function renderWdTable(totalFiltered) {
+  if (!wdItems.length) { empty('wd-result'); return; }
+
+  const doneCount = wdItems.filter(r => r.status && r.status !== 'loading' && r.status !== 'pending').length;
+  const progress = doneCount < wdItems.length
+    ? `<div style="font-size:11px;color:var(--blue);margin-bottom:8px">휴약기간 조회 중 · ${doneCount} / ${wdItems.length}</div>`
+    : '';
+
+  const rows = wdItems.map((r, i) => {
+    const c = WD_SPECIES_COLOR[r.축종] || 'var(--text3)';
+    const safeName = (r.품명||'').replace(/'/g,"\\'");
+    const st = WD_STATUS_LABEL[r.status] || WD_STATUS_LABEL.pending;
+
+    let qiaCell;
+    if (r.status === 'ok' || r.status === 'nowd' || r.status === 'noinfo' || r.status === 'error') {
+      const sim = r.유사도 != null ? ` <span style="color:var(--text3)">(유사도 ${Math.round(r.유사도*100)}%)</span>` : '';
+      qiaCell = r.링크
+        ? `<a href="${r.링크}" target="_blank" rel="noopener" style="color:var(--blue);font-weight:600">${r.qia제품명||''} ↗</a>${sim}`
+        : (r.qia제품명 || '-');
+    } else if (r.status === 'loading') {
+      qiaCell = '<span class="spinner" style="width:12px;height:12px"></span>';
+    } else {
+      qiaCell = '-';
+    }
+
+    let wdCell;
+    if (r.status === 'ok') {
+      wdCell = `<strong>${r.휴약기간}</strong>`;
+    } else if (r.status === 'loading' || r.status === 'pending') {
+      wdCell = `<span style="color:${st.cls}">${st.txt}</span>`;
+    } else {
+      wdCell = `<span style="color:${st.cls}">${st.txt}</span>
+        <button class="toggle-btn" style="padding:2px 8px;font-size:10px;margin-left:6px" onclick="jumpToQiaSearch('${safeName}')">직접 검색</button>`;
+    }
+
+    return `<tr>
+      <td class="num" style="color:var(--text3)">${i+1}</td>
+      <td class="hide-mobile">${r.대분류}</td>
+      <td><strong>${r.품명}</strong></td>
+      <td><span class="tag" style="background:${c}22;color:${c}">${r.축종}</span></td>
+      <td class="num hide-mobile">${fmtNum(r.현재재고)}</td>
+      <td class="hide-mobile">${qiaCell}</td>
+      <td>${wdCell}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('wd-result').innerHTML = `
+    ${progress}
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
+      ${wdSpecies === 'all' ? '전체' : wdSpecies} · ${wdItems.length}개 표시 (조건에 맞는 ${totalFiltered}개 중)${wdStockOnly ? ' · 재고있음만' : ''}
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        <th>#</th>
+        <th class="hide-mobile">제조사</th>
+        <th>품명</th>
+        <th>축종</th>
+        <th class="num hide-mobile">현재재고</th>
+        <th class="hide-mobile">QIA 매칭</th>
+        <th>휴약기간</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
 }
 </script>
 </body>
