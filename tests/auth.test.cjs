@@ -71,7 +71,17 @@ test('verified Google owner can enter, token refresh does not reload data', asyn
   assert.equal(h.visible(), true);
 });
 
+test('approved Google employee can enter', async () => {
+  const h = await setup();
+  await h.emit(user({ ...owner, email: 'jinhee4ys@gmail.com' }));
+  assert.equal(h.calls.started, 1);
+  assert.equal(h.visible(), true);
+  assert.equal(h.calls.signedOut, 0);
+});
+
 for (const [name, claims] of [
+  ['unverified employee', { ...owner, email: 'jinhee4ys@gmail.com', email_verified: false }],
+  ['employee using password provider', { ...owner, email: 'jinhee4ys@gmail.com', firebase: { sign_in_provider: 'password' } }],
   ['different email', { ...owner, email: 'someone@example.com' }],
   ['unverified email', { ...owner, email_verified: false }],
   ['password provider', { ...owner, firebase: { sign_in_provider: 'password' } }],

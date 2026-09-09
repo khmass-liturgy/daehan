@@ -1,5 +1,5 @@
 // UI checks are for usability. firestore.rules enforces access on the server.
-const ALLOWED_EMAIL = 'trsumun@gmail.com';
+const ALLOWED_EMAILS = ['trsumun@gmail.com', 'jinhee4ys@gmail.com'];
 const loginButton = document.getElementById('google-login-btn');
 const logoutButton = document.getElementById('logout-btn');
 const message = document.getElementById('login-err');
@@ -61,7 +61,7 @@ async function initializeLogin() {
     try {
       const { claims } = await user.getIdTokenResult();
       if (current !== generation) return;
-      const allowed = claims.email === ALLOWED_EMAIL
+      const allowed = ALLOWED_EMAILS.includes(claims.email)
         && claims.email_verified === true
         && claims.firebase?.sign_in_provider === 'google.com';
       if (!allowed) {
