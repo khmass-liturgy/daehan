@@ -112,9 +112,9 @@ th.bigo{min-width:110px}
   <div class="login-box">
     <div class="login-logo">대한<span>가축약품</span></div>
     <div class="login-sub">클라우드 조회 시스템</div>
-    <input type="password" id="token-input" placeholder="접속 코드 입력" onkeydown="if(event.key==='Enter')doLogin()">
-    <button class="login-btn" onclick="doLogin()">접속</button>
-    <div class="login-err" id="login-err"></div>
+    <button class="login-btn" id="google-login-btn" disabled>로그인 준비 중...</button>
+    <div class="login-err" id="login-err" role="status" aria-live="polite"></div>
+    <p style="font-size:12px;color:var(--text2)">승인된 Google 계정으로 로그인해 주세요.</p>
     <div class="login-cloud"><span class="dot"></span> Firebase 클라우드 · 24시간 조회 가능</div>
   </div>
 </div>
@@ -123,6 +123,7 @@ th.bigo{min-width:110px}
   <header>
     <div class="logo">대한<span>가축약품</span></div>
     <div class="badge" id="data-date">-</div>
+    <button class="toggle-btn" id="logout-btn">로그아웃</button>
   </header>
 
   <nav>
@@ -328,61 +329,19 @@ th.bigo{min-width:110px}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <!-- Firebase SDK -->
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getFirestore, collection, query, where, getDocs, orderBy, limit, doc, getDoc, setDoc, deleteDoc } 
-  from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-
-// ⚠️ Firebase 설정 - 자기 값으로 교체
-const firebaseConfig = {
-  apiKey: "AIzaSyANMiNELXSJJubUxS3xzUw9EwdBgUZ7jgU",
-  authDomain: "daehan-adb1d.firebaseapp.com",
-  projectId: "daehan-adb1d",
-  storageBucket: "daehan-adb1d.firebasestorage.app",
-  messagingSenderId: "21923430813",
-  appId: "1:21923430813:web:baf8aa751c1f68458bef74"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-
-// 전역으로 노출
-window.fbdb = db;
-window.fbFuncs = { collection, query, where, getDocs, orderBy, limit, doc, getDoc, setDoc, deleteDoc };
-
-// 초기화 완료 알림
-window.dispatchEvent(new Event('fbready'));
-</script>
+<script type="module" src="auth.js"></script>
 
 <script>
 // ── 상태 ─────────────────────────────────────────
-let TOKEN = '';
 let stockOnly = false, unpaidOnly = false;
-const ACCESS_CODE = 'daehan2024';  // 접속 코드 (원하면 변경)
-let dbReady = false;
 
-window.addEventListener('fbready', () => { dbReady = true; });
-
-// ── 로그인 ────────────────────────────────────────
-function doLogin() {
-  const t = document.getElementById('token-input').value.trim();
-  if (t !== ACCESS_CODE) {
-    document.getElementById('login-err').textContent = '접속 코드가 틀렸습니다';
-    return;
-  }
-  if (!dbReady) {
-    document.getElementById('login-err').textContent = '연결 중... 잠시 후 다시 시도하세요';
-    setTimeout(() => { if (dbReady) doLogin(); }, 1500);
-    return;
-  }
-  document.getElementById('login-screen').classList.add('hide');
-  document.getElementById('app').classList.add('show');
+// auth.js에서 승인된 로그인 확인 후 한 번만 호출합니다.
+window.startApp = function() {
   loadUploadInfo();  // 데이터 업데이트 일자 표시
   loadCategoryMap();  // 축종 매핑 로드 (백그라운드)
   loadProductSpecies();  // 제품 축종 로드
   searchStock();
-}
-window.doLogin = doLogin;
+};
 
 // ── 유틸 ─────────────────────────────────────────
 function fmt억(n) {

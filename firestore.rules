@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner() {
+      return request.auth != null
+        && request.auth.token.email == 'trsumun@gmail.com'
+        && request.auth.token.email_verified == true
+        && request.auth.token.firebase.sign_in_provider == 'google.com';
+    }
+
+    function validMapping(nameField, species) {
+      let data = request.resource.data;
+      return data.keys().hasAll([nameField, '축종', '갱신일시'])
+        && data.keys().hasOnly([nameField, '축종', '갱신일시'])
+        && data[nameField] is string
+        && data[nameField].size() > 0
+        && data[nameField].size() <= 500
+        && data['축종'] in species
+        && data['갱신일시'] is string
+        && data['갱신일시'].size() <= 40;
+    }
+
+    match /{collection}/{docId} {
+      allow read: if isOwner() && collection in [
+        '제품', '거래처', '잔액', '전표_세부', '전표_묶음',
+        '메타', '축종매핑', '제품축종'
+      ];
+      allow create, update: if isOwner() && (
+        (collection == '축종매핑' && validMapping('회사', ['양계', '양돈', '축우', '양견', '동물병원/유통', '미분류'])) ||
+        (collection == '제품축종' && validMapping('품명', ['양계', '양돈', '축우', '공통']))
+      );
+      allow delete: if isOwner()
+        && collection in ['축종매핑', '제품축종'];
+    }
+  }
+}

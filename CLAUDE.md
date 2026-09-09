@@ -2,7 +2,9 @@
 
 대한가축약품 Firestore 조회 웹앱(`index.html`)의 GitHub Pages 배포 저장소.
 로컬 원본은 `C:\daehan\firestore_project\web\index.html`이며, 이 저장소는 그 사본을 배포하는 용도.
-Firebase 프로젝트: `daehan-adb1d`. 접속 코드: `daehan2024` (index.html 내 `ACCESS_CODE`).
+Firebase 프로젝트: `daehan-adb1d`. Google 로그인(`auth.js`)을 사용하며 허용 계정은 `firestore.rules`에서도 검증한다. 공용 접속 코드를 다시 도입하지 않는다.
+`firestore.rules`는 GitHub Pages push만으로 Firebase에 적용되지 않는다. Firebase 콘솔에서 별도로 게시해야 한다.
+로그인 변경 후 로컬 사본을 동기화할 때는 `index.html`과 `auth.js`를 함께 복사한다.
 
 ## 커밋/푸시 워크플로우 (자동, 확인 불필요)
 
