@@ -326,7 +326,7 @@ th.bigo{min-width:110px}
 </div>
 
 <!-- 엑셀 내보내기 (SheetJS) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha512-r22gChDnGvBylk90+2e/ycr3RVrDi8DIOkIGNhJlKfuyQM4tIRAI062MaV8sfjQKYVGjOBaZBOA87z+IhZE9DA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
 <!-- Firebase SDK -->
 <script type="module" src="auth.js"></script>
@@ -352,6 +352,11 @@ function fmt억(n) {
 }
 function fmtNum(n) { return (+n||0).toLocaleString(); }
 function esc(s) { return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// onclick="fn('${jsq(x)}')" 처럼 인라인 이벤트의 작은따옴표 문자열에 넣을 값:
+// JS 문자열로 이스케이프(\ ' 개행)한 뒤 HTML 속성용으로 한 번 더 이스케이프(" < & 등)
+function jsq(s) { return esc(String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/[\r\n\u2028\u2029]/g,' ')); }
+// QIA 등 외부에서 받은 링크는 QIA 도메인일 때만 허용 (javascript: 등 차단)
+function safeUrl(u) { u = String(u||''); return u.startsWith('https://medi.qia.go.kr/') ? u : '#'; }
 function todayStr() { const d = new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function loading(id) { document.getElementById(id).innerHTML = '<div class="loading"><span class="spinner"></span>클라우드 조회 중...</div>'; }
 function empty(id) { document.getElementById(id).innerHTML = '<div class="empty">검색 결과가 없습니다</div>'; }
@@ -405,9 +410,9 @@ async function loadUploadInfo() {
       else 경과표시 = `${diff}일 전`;
     }
 
-    el.innerHTML = `📅 ${업로드일} 업데이트 <span style="color:var(--text3)">· ${경과표시}</span>`;
+    el.innerHTML = `📅 ${esc(업로드일)} 업데이트 <span style="color:var(--text3)">· ${경과표시}</span>`;
     el.style.cursor = 'pointer';
-    el.title = `데이터 최신 거래일: ${최신거래일}\n업로드 시각: ${m.업로드일시 || ''}\n총 ${(m.총건수||0).toLocaleString()}건`;
+    el.title = `데이터 최신 거래일: ${esc(최신거래일)}\n업로드 시각: ${esc(m.업로드일시 || '')}\n총 ${(m.총건수||0).toLocaleString()}건`;
     el.onclick = () => showUploadDetail(m);
 
     // 30일 넘으면 강조
@@ -439,11 +444,11 @@ function showUploadDetail(m) {
         <div style="font-size:16px;font-weight:700;margin-bottom:18px">데이터 업데이트 정보</div>
         <div style="display:flex;justify-content:space-between;padding:8px 0">
           <span style="color:var(--text2);font-size:13px">최근 업데이트</span>
-          <span style="font-size:14px;color:var(--blue);font-weight:600">${m.업로드일시 || m.업로드일 || '-'}</span>
+          <span style="font-size:14px;color:var(--blue);font-weight:600">${esc(m.업로드일시 || m.업로드일 || '-')}</span>
         </div>
         <div style="display:flex;justify-content:space-between;padding:8px 0">
           <span style="color:var(--text2);font-size:13px">데이터 최신 거래일</span>
-          <span style="font-size:14px;color:var(--green);font-weight:600">${m.최신거래일 || '-'}</span>
+          <span style="font-size:14px;color:var(--green);font-weight:600">${esc(m.최신거래일 || '-')}</span>
         </div>
         <div style="margin-top:14px">${rows}</div>
         <div style="display:flex;justify-content:space-between;padding:9px 0;border-top:2px solid var(--border);margin-top:6px">
@@ -539,12 +544,12 @@ function editProductSpecies(품명) {
   const 현재 = 제품축종[품명] || classifyProduct(품명);
   const options = ['양계','양돈','축우','공통'];
   const 색상map = { '양계':'#f0a050','양돈':'#e05555','축우':'#7F77DD','공통':'#36c4a0','미지정':'var(--text3)' };
-  const safe = 품명.replace(/'/g,"\\'");
+  const safe = jsq(품명);
   
   const html = `
     <div id="prod-sp-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:400;display:flex;align-items:center;justify-content:center;padding:16px" onclick="closeProdSp(event)">
       <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:14px;padding:22px;max-width:400px;width:100%" onclick="event.stopPropagation()">
-        <div style="font-size:15px;font-weight:700;margin-bottom:4px">${품명}</div>
+        <div style="font-size:15px;font-weight:700;margin-bottom:4px">${esc(품명)}</div>
         <div style="font-size:11px;color:var(--text3);margin-bottom:18px">현재 축종: <span style="color:${색상map[현재]};font-weight:600">${현재}</span></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           ${options.map(opt => `
@@ -638,7 +643,7 @@ async function loadMfgList() {
     const sorted = [...mfgs].sort((a,b) => a.localeCompare(b));
     const select = document.getElementById('stock-mfg');
     select.innerHTML = '<option value="">제조사 전체</option>' + 
-      sorted.map(m => `<option value="${m}">${m}</option>`).join('');
+      sorted.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
     mfgListLoaded = true;
   } catch(e) { console.warn('제조사 목록 로드 실패', e); }
 }
@@ -701,7 +706,7 @@ async function searchStock() {
     stockItems = items;
     renderStockResult();
   } catch(e) {
-    document.getElementById('stock-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+    document.getElementById('stock-result').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
   }
 }
 window.searchStock = searchStock;
@@ -718,16 +723,16 @@ function renderStockResult() {
     const has = r.현재재고 > 0;
     const sp = r._축종;
     const spColor = 색상map[sp];
-    const safe = (r.품명||'').replace(/'/g,"\\'");
+    const safe = jsq(r.품명);
     return `<tr>
-      <td>${r.대분류||''}</td>
+      <td>${esc(r.대분류||'')}</td>
       <td onclick="showProductBuyers('${safe}')" style="cursor:pointer" title="이 제품을 구매한 거래처 보기">
-        <strong style="color:var(--blue)">${r.품명||''}</strong> <span style="font-size:10px;color:var(--text3)">🔍</span>
+        <strong style="color:var(--blue)">${esc(r.품명||'')}</strong> <span style="font-size:10px;color:var(--text3)">🔍</span>
       </td>
       <td>
         <span onclick="editProductSpecies('${safe}')" title="클릭하여 축종 지정"
           style="cursor:pointer;font-size:10px;padding:2px 7px;border-radius:8px;background:${spColor}22;color:${spColor};font-weight:600;border:1px solid ${sp!=='미지정'?spColor:'transparent'}">
-          ${sp}${sp!=='미지정'?' ✎':' +'}
+          ${esc(sp)}${sp!=='미지정'?' ✎':' +'}
         </span>
       </td>
       <td class="num"><span class="tag ${has?'tag-재고있음':'tag-재고없음'}">${fmtNum(r.현재재고)}</span></td>
@@ -736,7 +741,7 @@ function renderStockResult() {
     </tr>`;
   }).join('');
 
-  const 제목 = mfg ? `[${mfg}] ` : '';
+  const 제목 = mfg ? `[${esc(mfg)}] ` : '';
   const 축종제목 = stockSpecies !== 'all' ? `[${stockSpecies}] ` : '';
   document.getElementById('stock-result').innerHTML = `
     <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${제목}${축종제목}${items.length}개 품목 · 헤더 클릭시 정렬 · 축종 태그 클릭하여 지정</div>
@@ -789,7 +794,7 @@ async function searchCustProducts() {
     }
 
     if (!details.length) {
-      document.getElementById('stock-result').innerHTML = `<div class="empty">${company}의 구매 내역이 없습니다</div>`;
+      document.getElementById('stock-result').innerHTML = `<div class="empty">${esc(company)}의 구매 내역이 없습니다</div>`;
       return;
     }
 
@@ -811,7 +816,7 @@ async function searchCustProducts() {
     custProdInfo = { 실제거래처: details[0].회사, 총구매횟수: details.length };
     renderCustProdResult();
   } catch(e) {
-    document.getElementById('stock-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+    document.getElementById('stock-result').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
     console.error(e);
   }
 }
@@ -824,16 +829,16 @@ function renderCustProdResult() {
   const items = sortBy(custProdItems, custProdSort, CUSTPROD_SORT_TYPES);
 
   const rows = items.slice(0, 300).map(r => {
-    const safeP = (r.품명||'').replace(/'/g,"\\'");
+    const safeP = jsq(r.품명);
     return `<tr>
-    <td>${r.대분류||''}</td>
+    <td>${esc(r.대분류||'')}</td>
     <td onclick="showProductBuyers('${safeP}')" style="cursor:pointer" title="이 제품을 구매한 거래처 보기">
-      <strong style="color:var(--blue)">${r.품명||''}</strong> <span style="font-size:10px;color:var(--text3)">🔍</span>
+      <strong style="color:var(--blue)">${esc(r.품명||'')}</strong> <span style="font-size:10px;color:var(--text3)">🔍</span>
     </td>
-    <td class="num">${r.구매횟수}회</td>
+    <td class="num">${esc(r.구매횟수)}회</td>
     <td class="num">${fmtNum(r.총수량)}</td>
     <td class="num hide-mobile">${fmtNum(r.최근단가)}</td>
-    <td style="font-size:11px;color:var(--text3)">${r.최근구매||''}</td>
+    <td style="font-size:11px;color:var(--text3)">${esc(r.최근구매||'')}</td>
   </tr>`;
   }).join('');
 
@@ -841,7 +846,7 @@ function renderCustProdResult() {
     <div class="kpi-grid" style="margin-bottom:14px">
       <div class="kpi b" style="grid-column:span 2">
         <div class="kpi-lbl">거래처</div>
-        <div class="kpi-val" style="font-size:18px">${실제거래처}</div>
+        <div class="kpi-val" style="font-size:18px">${esc(실제거래처)}</div>
         <div class="kpi-sub">구매 제품 분석</div>
       </div>
       <div class="kpi g">
@@ -884,7 +889,7 @@ async function showProductBuyers(품명) {
       <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:14px;padding:22px;max-width:520px;width:100%;max-height:85vh;overflow-y:auto" onclick="event.stopPropagation()">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
           <div>
-            <div style="font-size:17px;font-weight:700">${품명}</div>
+            <div style="font-size:17px;font-weight:700">${esc(품명)}</div>
             <div style="font-size:11px;color:var(--text3)" id="pb-sub">불러오는 중...</div>
           </div>
           <button onclick="closeProductBuyers()" style="background:var(--bg3);border:none;color:var(--text2);border-radius:8px;width:30px;height:30px;cursor:pointer;font-size:16px">✕</button>
@@ -924,7 +929,7 @@ async function showProductBuyers(품명) {
     document.getElementById('pb-sub').textContent = `${pbFarms.length}개 거래처 구매 (최근 1년치 데이터 기준)`;
     renderProductBuyers();
   } catch(e) {
-    document.getElementById('pb-body').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+    document.getElementById('pb-body').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
     console.error(e);
   }
 }
@@ -935,12 +940,12 @@ function renderProductBuyers() {
   const farms = sortBy(pbFarms, pbSort, PB_SORT_TYPES);
 
   const rows = farms.slice(0, 200).map(r => {
-    const safe = (r.회사||'').replace(/'/g,"\\'");
+    const safe = jsq(r.회사);
     return `<tr onclick="closeProductBuyers();goTxnByCompany('${safe}')" style="cursor:pointer" title="거래내역 보기">
-      <td><strong style="color:var(--blue)">${r.회사}</strong></td>
-      <td class="num">${r.구매횟수}회</td>
+      <td><strong style="color:var(--blue)">${esc(r.회사)}</strong></td>
+      <td class="num">${esc(r.구매횟수)}회</td>
       <td class="num">${fmtNum(r.총수량)}</td>
-      <td style="font-size:11px;color:var(--text3)">${r.최근구매}</td>
+      <td style="font-size:11px;color:var(--text3)">${esc(r.최근구매)}</td>
     </tr>`;
   }).join('');
 
@@ -1023,7 +1028,7 @@ async function searchBalance() {
     balanceItems = items;
     renderBalanceResult();
   } catch(e) {
-    document.getElementById('balance-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+    document.getElementById('balance-result').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
     console.error(e);
   }
 }
@@ -1035,20 +1040,20 @@ function renderBalanceResult() {
 
   const rows = items.slice(0, 300).map(r => {
     const cls = r.잔액 > 0 ? 'pos' : r.잔액 < 0 ? 'neg' : 'zero';
-    const safeName = (r.회사||'').replace(/'/g,"\\'");
-    const 이름표시 = r.이름 ? `<span style="font-size:11px;color:var(--text3);margin-left:6px">(${r.이름})</span>` : '';
+    const safeName = jsq(r.회사);
+    const 이름표시 = r.이름 ? `<span style="font-size:11px;color:var(--text3);margin-left:6px">(${esc(r.이름)})</span>` : '';
     return `<tr>
       <td onclick="goTxnByCompany('${safeName}')" style="cursor:pointer" title="거래내역 보기">
-        <strong style="color:var(--blue)">${r.회사||''}</strong>${이름표시}
+        <strong style="color:var(--blue)">${esc(r.회사||'')}</strong>${이름표시}
         <span style="font-size:10px;color:var(--text3);margin-left:6px">📋</span>
       </td>
-      <td class="num ${cls}" onclick="showBalanceDetail('${safeName}', ${r.총매출||0}, ${r.총수금||0}, ${r.잔액||0}, '${r.잔액기준일||''}', '${r.잔액기준계정||''}', ${r.합산잔액||0})" style="cursor:pointer" title="잔액 상세 보기">
+      <td class="num ${cls}" onclick="showBalanceDetail('${safeName}', ${esc(r.총매출||0)}, ${esc(r.총수금||0)}, ${esc(r.잔액||0)}, '${jsq(r.잔액기준일||'')}', '${jsq(r.잔액기준계정||'')}', ${esc(r.합산잔액||0)})" style="cursor:pointer" title="잔액 상세 보기">
         <strong>${fmtNum(r.잔액)}</strong>
         <span style="font-size:10px;color:var(--text3);margin-left:4px">🔍</span>
       </td>
-      <td style="font-size:11px;color:var(--text3)">${r.잔액기준일||'-'}${r.잔액기준계정?' '+r.잔액기준계정:''}</td>
+      <td style="font-size:11px;color:var(--text3)">${esc(r.잔액기준일||'-')}${esc(r.잔액기준계정?' '+r.잔액기준계정:'')}</td>
       <td class="num hide-mobile">${fmt억(r.총매출)}</td>
-      <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.최종매출일||''}</td>
+      <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${esc(r.최종매출일||'')}</td>
     </tr>`;
   }).join('');
 
@@ -1088,7 +1093,7 @@ function showBalanceDetail(name, sales, collected, balance, 기준일, 기준계
   const html = `
     <div id="bal-detail-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px" onclick="closeBalanceDetail(event)">
       <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:14px;padding:24px;max-width:420px;width:100%" onclick="event.stopPropagation()">
-        <div style="font-size:16px;font-weight:700;margin-bottom:6px">${name}</div>
+        <div style="font-size:16px;font-weight:700;margin-bottom:6px">${esc(name)}</div>
         <div style="font-size:12px;color:var(--text3);margin-bottom:20px">잔액 상세</div>
 
         <div style="display:flex;justify-content:space-between;padding:16px 0 8px">
@@ -1096,7 +1101,7 @@ function showBalanceDetail(name, sales, collected, balance, 기준일, 기준계
           <span style="font-size:22px;color:${balance>0?'var(--amber)':balance<0?'var(--green)':'var(--text3)'};font-weight:700">${fmtNum(balance)}원</span>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-bottom:16px">
-          ${기준일 ? `${기준일} ${기준계정} 명세표 기준` : '기준 전표 없음'}
+          ${기준일 ? `${esc(기준일)} ${esc(기준계정)} 명세표 기준` : '기준 전표 없음'}
         </div>
 
         <div style="display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid var(--bg3)">
@@ -1114,7 +1119,7 @@ function showBalanceDetail(name, sales, collected, balance, 기준일, 기준계
 
         <div style="display:flex;gap:8px;margin-top:20px">
           <button class="search-btn" style="flex:1;background:var(--bg3);color:var(--text2);border:1px solid var(--border2)" onclick="closeBalanceDetail()">닫기</button>
-          <button class="search-btn" style="flex:1" onclick="closeBalanceDetail();goTxnByCompany('${name.replace(/'/g,"\\'")}')">거래내역 보기</button>
+          <button class="search-btn" style="flex:1" onclick="closeBalanceDetail();goTxnByCompany('${jsq(name)}')">거래내역 보기</button>
         </div>
       </div>
     </div>
@@ -1384,7 +1389,7 @@ async function searchTxn() {
     txnCtx = { showBalance, balanceMap, targetCompany, finalBalance, matchedCompanyCount: matchedCompanies.size, company, from, to };
     renderTxnResult();
   } catch(e) {
-    document.getElementById('txn-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+    document.getElementById('txn-result').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
     console.error(e);
   }
 }
@@ -1396,16 +1401,16 @@ function renderTxnResult() {
   const items = sortBy(txnItems, txnSort, TXN_SORT_TYPES);
 
   const rows = items.slice(0, 500).map(r => {
-    const tagCls = `tag-${r.계정}`;
+    const tagCls = `tag-${esc(r.계정)}`;
     const bal = balanceMap[r.전표번호];
     const balCell = showBalance
       ? (bal!==undefined ? `<td class="num ${bal>0?'pos':bal<0?'neg':'zero'}"><strong>${fmtNum(bal)}</strong></td>` : `<td class="num" style="color:var(--text3)">-</td>`)
       : '';
     return `<tr>
-      <td style="color:var(--text3)">${r.날짜||''}</td>
-      <td><strong>${r.회사||''}</strong></td>
-      <td><span class="tag ${tagCls}">${r.계정||''}</span></td>
-      <td>${r.품명||'-'}</td>
+      <td style="color:var(--text3)">${esc(r.날짜||'')}</td>
+      <td><strong>${esc(r.회사||'')}</strong></td>
+      <td><span class="tag ${tagCls}">${esc(r.계정||'')}</span></td>
+      <td>${esc(r.품명||'-')}</td>
       <td class="num hide-mobile">${r.수량>0?fmtNum(r.수량):'-'}</td>
       <td class="num hide-mobile">${r.단가>0?fmtNum(r.단가):'-'}</td>
       <td class="num">${r.공급가액>0?fmtNum(r.공급가액):'-'}</td>
@@ -1421,7 +1426,7 @@ function renderTxnResult() {
   if (matchedCompanyCount > 1) {
     infoMsg += ` · ${matchedCompanyCount}개 거래처 매칭 (정확한 이름 입력시 잔액 표시)`;
   } else if (targetCompany && targetCompany !== company) {
-    infoMsg += ` · 매칭된 거래처: ${targetCompany}`;
+    infoMsg += ` · 매칭된 거래처: ${esc(targetCompany)}`;
   }
 
   let finalBalanceCard = '';
@@ -1432,9 +1437,9 @@ function renderTxnResult() {
       <div class="card" style="margin-bottom:14px">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
           <div>
-            <div style="font-size:13px;color:var(--text2);font-weight:600">${targetCompany} · 최종잔액 (미수금)</div>
+            <div style="font-size:13px;color:var(--text2);font-weight:600">${esc(targetCompany)} · 최종잔액 (미수금)</div>
             <div style="font-size:11px;color:var(--text3);margin-top:4px">
-              ${finalBalance.잔액기준일 ? `${finalBalance.잔액기준일} ${finalBalance.잔액기준계정||''} 명세표 기준` : '기준 전표 없음'}
+              ${finalBalance.잔액기준일 ? `${esc(finalBalance.잔액기준일)} ${esc(finalBalance.잔액기준계정||'')} 명세표 기준` : '기준 전표 없음'}
             </div>
           </div>
           <div style="font-size:24px;font-weight:700;color:${fbColor}">${fmtNum(fb)}<span style="font-size:13px">원</span></div>
@@ -1606,20 +1611,20 @@ function editCategory(회사) {
   const html = `
     <div id="cat-edit-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:400;display:flex;align-items:center;justify-content:center;padding:16px" onclick="closeCatEdit(event)">
       <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:14px;padding:22px;max-width:400px;width:100%" onclick="event.stopPropagation()">
-        <div style="font-size:16px;font-weight:700;margin-bottom:4px">${회사}</div>
+        <div style="font-size:16px;font-weight:700;margin-bottom:4px">${esc(회사)}</div>
         <div style="font-size:11px;color:var(--text3);margin-bottom:18px">
           현재: <span style="color:${색상map[현재]};font-weight:600">${현재}</span>
           ${isManual ? '<span style="margin-left:6px;background:#28336b;color:#a5b7ff;padding:1px 6px;border-radius:8px;font-size:10px">수동</span>' : '<span style="margin-left:6px;color:var(--text3);font-size:10px">(자동 분류)</span>'}
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           ${options.map(opt => `
-            <button onclick="doSetCategory('${회사.replace(/'/g,"\\'")}', '${opt}')" 
+            <button onclick="doSetCategory('${jsq(회사)}', '${opt}')" 
               style="padding:10px;border-radius:8px;background:var(--bg3);border:1px solid var(--border2);color:${색상map[opt]};font-size:13px;font-weight:600;cursor:pointer;${현재===opt?'border-color:'+색상map[opt]+';background:'+색상map[opt]+'22':''}">
               ${opt}
             </button>
           `).join('')}
         </div>
-        <button onclick="doSetCategory('${회사.replace(/'/g,"\\'")}', 'auto')" 
+        <button onclick="doSetCategory('${jsq(회사)}', 'auto')" 
           style="width:100%;margin-top:12px;padding:10px;border-radius:8px;background:transparent;border:1px solid var(--border2);color:var(--text2);font-size:12px;cursor:pointer">
           🔄 자동 분류로 되돌리기
         </button>
@@ -1770,7 +1775,7 @@ async function searchInactive() {
     inactiveItems = items;
     renderInactiveResult();
   } catch(e) {
-    document.getElementById('inactive-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+    document.getElementById('inactive-result').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
     console.error(e);
   }
 }
@@ -1782,8 +1787,8 @@ function renderInactiveResult() {
 
   const rows = items.slice(0, 300).map(r => {
       const cls = r.잔액 > 0 ? 'pos' : r.잔액 < 0 ? 'neg' : 'zero';
-      const 이름표시 = r.이름 ? `<span style="font-size:11px;color:var(--text3);margin-left:6px">(${r.이름})</span>` : '';
-      const safeName = (r.회사||'').replace(/'/g,"\\'");
+      const 이름표시 = r.이름 ? `<span style="font-size:11px;color:var(--text3);margin-left:6px">(${esc(r.이름)})</span>` : '';
+      const safeName = jsq(r.회사);
       const isManual = !!축종매핑[r.회사];
       
       // 미거래 일수에 따른 색상
@@ -1804,20 +1809,20 @@ function renderInactiveResult() {
       
       return `<tr>
         <td onclick="goTxnByCompany('${safeName}')" style="cursor:pointer" title="거래내역 보기">
-          <strong style="color:var(--blue)">${r.회사||''}</strong>${이름표시}
+          <strong style="color:var(--blue)">${esc(r.회사||'')}</strong>${이름표시}
           <span style="font-size:10px;color:var(--text3);margin-left:6px">📋</span>
         </td>
         <td>
           <span onclick="editCategory('${safeName}')" title="클릭하여 축종 변경"
             style="cursor:pointer;font-size:10px;padding:2px 6px;border-radius:8px;background:${축종Color}33;color:${축종Color};font-weight:600;border:1px solid ${isManual?축종Color:'transparent'}">
-            ${r.축종}${isManual?' ✎':''}
+            ${esc(r.축종)}${isManual?' ✎':''}
           </span>
         </td>
-        <td class="num" style="color:${dayColor};font-weight:600">${r.미거래일수}일</td>
-        <td style="font-size:11px;color:var(--text3)">${r.최종매출일||''}</td>
+        <td class="num" style="color:${dayColor};font-weight:600">${esc(r.미거래일수)}일</td>
+        <td style="font-size:11px;color:var(--text3)">${esc(r.최종매출일||'')}</td>
         <td class="num ${cls}"><strong>${fmtNum(r.잔액)}</strong></td>
-        <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.전화||''}</td>
-        <td class="hide-mobile">${r.담당사원||''}</td>
+        <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${esc(r.전화||'')}</td>
+        <td class="hide-mobile">${esc(r.담당사원||'')}</td>
       </tr>`;
     }).join('');
     
@@ -1956,7 +1961,7 @@ async function searchSalesRank() {
 
     renderSalesRank();
   } catch(e) {
-    document.getElementById('salesrank-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+    document.getElementById('salesrank-result').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
     console.error(e);
   }
 }
@@ -1977,26 +1982,26 @@ function renderSalesRank() {
   const items = sortBy(srItems, srSort, SR_SORT_TYPES);
 
   const rows = items.map((r, i) => {
-    const safeName = (r.회사||'').replace(/'/g,"\\'");
+    const safeName = jsq(r.회사);
     const isManual = !!축종매핑[r.회사];
     const c = 축종Color[r.축종] || 'var(--text3)';
-    const 이름표시 = r.이름 ? `<span style="font-size:11px;color:var(--text3);margin-left:6px">(${r.이름})</span>` : '';
+    const 이름표시 = r.이름 ? `<span style="font-size:11px;color:var(--text3);margin-left:6px">(${esc(r.이름)})</span>` : '';
     const balCls = r.잔액 > 0 ? 'pos' : r.잔액 < 0 ? 'neg' : 'zero';
     return `<tr>
       <td class="num" style="color:var(--text3)">${i+1}</td>
       <td onclick="goTxnByCompany('${safeName}')" style="cursor:pointer" title="거래내역 보기">
-        <strong style="color:var(--blue)">${r.회사||''}</strong>${이름표시}
+        <strong style="color:var(--blue)">${esc(r.회사||'')}</strong>${이름표시}
       </td>
       <td>
         <span onclick="editCategory('${safeName}')" title="클릭하여 축종 변경"
           style="cursor:pointer;font-size:10px;padding:2px 6px;border-radius:8px;background:${c}33;color:${c};font-weight:600;border:1px solid ${isManual?c:'transparent'}">
-          ${r.축종}${isManual?' ✎':''}
+          ${esc(r.축종)}${isManual?' ✎':''}
         </span>
       </td>
       <td class="num"><strong>${fmt억(r.총매출)}</strong></td>
       <td class="num hide-mobile ${balCls}">${fmtNum(r.잔액)}</td>
-      <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.최종매출일||''}</td>
-      <td class="hide-mobile">${r.담당사원||''}</td>
+      <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${esc(r.최종매출일||'')}</td>
+      <td class="hide-mobile">${esc(r.담당사원||'')}</td>
     </tr>`;
   }).join('');
 
@@ -2129,7 +2134,7 @@ async function searchProdAnalysis() {
     paRawProducts = 전체목록;
     renderProdAnalysis();
   } catch(e) {
-    document.getElementById('panal-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+    document.getElementById('panal-result').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
     console.error(e);
   }
 }
@@ -2151,20 +2156,20 @@ function renderProdAnalysis() {
   const alertItems = ranked.filter(r => r.재고주의);
 
   const rows = paItems.map(r => {
-    const safeName = (r.품명||'').replace(/'/g,"\\'");
-    const safeBuyer = (r.최다구매거래처||'').replace(/'/g,"\\'");
+    const safeName = jsq(r.품명);
+    const safeBuyer = jsq(r.최다구매거래처);
     const c = PA_SPECIES_COLOR[r.축종] || 'var(--text3)';
     const stockStyle = r.재고주의 ? 'color:var(--amber);font-weight:700' : (r.현재재고<=0 ? 'color:var(--red)' : '');
     const stockBadge = r.재고주의 ? '<br><span class="tag" style="background:var(--amber)22;color:var(--amber)">⚠ 주문 필요</span>' : '';
     const buyerCell = r.최다구매거래처
-      ? `<span style="cursor:pointer;color:var(--blue)" onclick="goTxnByCompany('${safeBuyer}')" title="거래내역 보기"><strong>${r.최다구매거래처}</strong></span>
-         <div style="font-size:10px;color:var(--text3)">${fmtNum(r.최다구매수량)}개 · ${r.최다구매횟수}회</div>`
+      ? `<span style="cursor:pointer;color:var(--blue)" onclick="goTxnByCompany('${safeBuyer}')" title="거래내역 보기"><strong>${esc(r.최다구매거래처)}</strong></span>
+         <div style="font-size:10px;color:var(--text3)">${fmtNum(r.최다구매수량)}개 · ${esc(r.최다구매횟수)}회</div>`
       : '<span style="color:var(--text3)">-</span>';
     return `<tr>
-      <td class="num" style="color:var(--text3)">${r._순위}</td>
-      <td class="hide-mobile">${r.대분류}</td>
-      <td><strong style="cursor:pointer;color:var(--blue)" onclick="showProductBuyers('${safeName}')" title="구매 거래처 전체 보기">${r.품명}</strong></td>
-      <td><span class="tag" style="background:${c}22;color:${c}">${r.축종}</span></td>
+      <td class="num" style="color:var(--text3)">${esc(r._순위)}</td>
+      <td class="hide-mobile">${esc(r.대분류)}</td>
+      <td><strong style="cursor:pointer;color:var(--blue)" onclick="showProductBuyers('${safeName}')" title="구매 거래처 전체 보기">${esc(r.품명)}</strong></td>
+      <td><span class="tag" style="background:${c}22;color:${c}">${esc(r.축종)}</span></td>
       <td class="num"><strong>${fmt억(r.매출금액)}</strong></td>
       <td class="num hide-mobile">${fmtNum(r.판매수량)}</td>
       <td class="num" style="${stockStyle}">${fmtNum(r.현재재고)}${stockBadge}</td>
@@ -2175,7 +2180,7 @@ function renderProdAnalysis() {
   const alertBanner = alertItems.length ? `
     <div class="card" style="margin-bottom:14px;border-color:var(--amber)">
       <div style="font-size:13px;font-weight:700;color:var(--amber);margin-bottom:6px">⚠ 재고 확인 필요 (10~20개 남음) · ${alertItems.length}개 품목</div>
-      <div style="font-size:12px;color:var(--text2)">${alertItems.map(r => `${r.품명} (${fmtNum(r.현재재고)}개)`).join(' · ')}</div>
+      <div style="font-size:12px;color:var(--text2)">${alertItems.map(r => `${esc(r.품명)} (${fmtNum(r.현재재고)}개)`).join(' · ')}</div>
     </div>` : '';
 
   document.getElementById('panal-result').innerHTML = `
@@ -2248,7 +2253,7 @@ async function searchInfo() {
     infoItems = items;
     renderInfoResult();
   } catch(e) {
-    document.getElementById('info-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+    document.getElementById('info-result').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
   }
 }
 window.searchInfo = searchInfo;
@@ -2258,15 +2263,15 @@ function renderInfoResult() {
   const items = sortBy(infoItems, infoSort, INFO_SORT_TYPES);
 
   const rows = items.slice(0, 300).map(r => {
-    const safe = (r.회사||'').replace(/'/g,"\\'");
+    const safe = jsq(r.회사);
     return `<tr onclick="showCompanyDetail('${safe}')" style="cursor:pointer" title="거래내역·잔액 보기">
-    <td><strong style="color:var(--blue)">${r.회사||''}</strong> <span style="font-size:10px;color:var(--text3)">🔍</span></td>
-    <td>${r.이름||''}</td>
-    <td>${r.전화1||''}</td>
-    <td class="hide-mobile">${r.분류||''}</td>
-    <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.주소||''}</td>
-    <td>${r.담당사원||''}</td>
-    <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.최종매출일||''}</td>
+    <td><strong style="color:var(--blue)">${esc(r.회사||'')}</strong> <span style="font-size:10px;color:var(--text3)">🔍</span></td>
+    <td>${esc(r.이름||'')}</td>
+    <td>${esc(r.전화1||'')}</td>
+    <td class="hide-mobile">${esc(r.분류||'')}</td>
+    <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${esc(r.주소||'')}</td>
+    <td>${esc(r.담당사원||'')}</td>
+    <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${esc(r.최종매출일||'')}</td>
   </tr>`;
   }).join('');
 
@@ -2294,7 +2299,7 @@ async function showCompanyDetail(company) {
       <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:14px;padding:22px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto" onclick="event.stopPropagation()">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
           <div>
-            <div style="font-size:17px;font-weight:700">${company}</div>
+            <div style="font-size:17px;font-weight:700">${esc(company)}</div>
             <div style="font-size:11px;color:var(--text3)" id="cd-sub">불러오는 중...</div>
           </div>
           <button onclick="closeCompanyDetail()" style="background:var(--bg3);border:none;color:var(--text2);border-radius:8px;width:30px;height:30px;cursor:pointer;font-size:16px">✕</button>
@@ -2331,12 +2336,12 @@ async function showCompanyDetail(company) {
     let txnRows = '';
     if (txns.length) {
       txnRows = txns.map(r => {
-        const tagCls = `tag-${r.계정}`;
+        const tagCls = `tag-${esc(r.계정)}`;
         const amt = r.공급가액 > 0 ? fmtNum(r.공급가액) : '-';
         return `<tr>
-          <td style="color:var(--text3);font-size:11px">${r.날짜||''}</td>
-          <td><span class="tag ${tagCls}">${r.계정||''}</span></td>
-          <td style="font-size:12px">${r.품명||'-'}</td>
+          <td style="color:var(--text3);font-size:11px">${esc(r.날짜||'')}</td>
+          <td><span class="tag ${tagCls}">${esc(r.계정||'')}</span></td>
+          <td style="font-size:12px">${esc(r.품명||'-')}</td>
           <td class="num" style="font-size:12px">${r.수량>0?fmtNum(r.수량):'-'}</td>
           <td class="num" style="font-size:12px">${amt}</td>
         </tr>`;
@@ -2352,10 +2357,10 @@ async function showCompanyDetail(company) {
           <span style="font-size:22px;font-weight:700;color:${잔액색}">${fmtNum(잔액)}원</span>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:4px">
-          ${기준일 ? `${기준일} ${기준계정} 명세표 기준` : '잔액 정보 없음'}
+          ${기준일 ? `${esc(기준일)} ${esc(기준계정)} 명세표 기준` : '잔액 정보 없음'}
         </div>
         <button class="search-btn" style="width:100%;margin-top:12px;font-size:12px" 
-          onclick="closeCompanyDetail();goTxnByCompany('${company.replace(/'/g,"\\'")}')">
+          onclick="closeCompanyDetail();goTxnByCompany('${jsq(company)}')">
           전체 거래내역 보기 →
         </button>
       </div>
@@ -2365,7 +2370,7 @@ async function showCompanyDetail(company) {
         <tbody>${txnRows}</tbody>
       </table></div>`;
   } catch(e) {
-    document.getElementById('cd-body').innerHTML = `<div class="empty">오류: ${e.message}<br><span style="font-size:11px">인덱스 생성이 필요할 수 있습니다</span></div>`;
+    document.getElementById('cd-body').innerHTML = `<div class="empty">오류: ${esc(e.message)}<br><span style="font-size:11px">인덱스 생성이 필요할 수 있습니다</span></div>`;
     console.error(e);
   }
 }
@@ -2552,7 +2557,7 @@ async function searchQia() {
     }
     renderQiaResult();
   } catch(e) {
-    document.getElementById('qia-result').innerHTML = `<div class="empty">조회 실패: ${e.message}<br><span style="font-size:11px">농림축산검역본부(QIA) 서버 연결에 문제가 있을 수 있습니다</span></div>`;
+    document.getElementById('qia-result').innerHTML = `<div class="empty">조회 실패: ${esc(e.message)}<br><span style="font-size:11px">농림축산검역본부(QIA) 서버 연결에 문제가 있을 수 있습니다</span></div>`;
     console.error(e);
   }
 }
@@ -2587,7 +2592,7 @@ function renderQiaResult() {
       wdCell = r._wdErr
         ? '<span style="color:var(--red);font-size:11px">조회 오류</span>'
         : (r._휴약기간
-            ? `<span style="font-size:12px;font-weight:700">${r._휴약기간}</span>`
+            ? `<span style="font-size:12px;font-weight:700">${esc(r._휴약기간)}</span>`
             : '<span style="color:var(--amber);font-size:11px">표기 확인 필요</span>');
     } else if (r.링크) {
       wdCell = `<button class="toggle-btn" style="padding:2px 8px;font-size:10px" onclick="loadQiaWithdrawal(${i})">조회</button>`;
@@ -2595,13 +2600,13 @@ function renderQiaResult() {
       wdCell = '<span style="color:var(--text3)">-</span>';
     }
     return `<tr>
-    <td>${r.링크 ? `<a href="${r.링크}" target="_blank" rel="noopener" style="color:var(--blue);font-weight:600">${r.제품명||''} ↗</a>` : `<strong>${r.제품명||''}</strong>`}</td>
-    <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.제품영문명||''}</td>
-    <td>${r.업체명||''}</td>
-    <td><span class="tag ${r.품목구분==='동물용의약품'?'tag-매출':'tag-매입'}">${r.품목구분||''}</span></td>
-    <td class="hide-mobile">${r.주성분||''}</td>
-    <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${r.허가일||''}</td>
-    <td class="hide-mobile">${r.제조수입||''}</td>
+    <td>${r.링크 ? `<a href="${esc(safeUrl(r.링크))}" target="_blank" rel="noopener" style="color:var(--blue);font-weight:600">${esc(r.제품명||'')} ↗</a>` : `<strong>${esc(r.제품명||'')}</strong>`}</td>
+    <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${esc(r.제품영문명||'')}</td>
+    <td>${esc(r.업체명||'')}</td>
+    <td><span class="tag ${r.품목구분==='동물용의약품'?'tag-매출':'tag-매입'}">${esc(r.품목구분||'')}</span></td>
+    <td class="hide-mobile">${esc(r.주성분||'')}</td>
+    <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${esc(r.허가일||'')}</td>
+    <td class="hide-mobile">${esc(r.제조수입||'')}</td>
     <td>${wdCell}</td>
   </tr>`;
   }).join('');
@@ -2613,7 +2618,7 @@ function renderQiaResult() {
 
   const fuzzyBanner = qiaFuzzy
     ? `<div style="margin-bottom:10px;padding:10px 14px;background:var(--bg3);border:1px solid var(--amber);border-radius:8px;font-size:12px;color:var(--amber)">
-        "${qiaQuery}"의 정확한 일치 결과가 없어, 비슷한 이름의 결과 ${qiaRows.length}건을 유사도순으로 보여드립니다
+        "${esc(qiaQuery)}"의 정확한 일치 결과가 없어, 비슷한 이름의 결과 ${qiaRows.length}건을 유사도순으로 보여드립니다
       </div>`
     : '';
 
@@ -2818,7 +2823,7 @@ async function searchWd() {
   try {
     if (!wdRawProducts.length) await loadWdProducts();
   } catch(e) {
-    document.getElementById('wd-result').innerHTML = `<div class="empty">오류: ${e.message}</div>`;
+    document.getElementById('wd-result').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
     return;
   }
 
@@ -2868,14 +2873,14 @@ function renderWdTable(totalFiltered) {
 
   const rows = wdItems.map((r, i) => {
     const c = WD_SPECIES_COLOR[r.축종] || 'var(--text3)';
-    const safeName = (r.품명||'').replace(/'/g,"\\'");
+    const safeName = jsq(r.품명);
     const st = WD_STATUS_LABEL[r.status] || WD_STATUS_LABEL.pending;
 
     let qiaCell;
     if (r.status === 'ok' || r.status === 'nowd' || r.status === 'noinfo' || r.status === 'error') {
       const sim = r.유사도 != null ? ` <span style="color:var(--text3)">(유사도 ${Math.round(r.유사도*100)}%)</span>` : '';
       qiaCell = r.링크
-        ? `<a href="${r.링크}" target="_blank" rel="noopener" style="color:var(--blue);font-weight:600">${r.qia제품명||''} ↗</a>${sim}`
+        ? `<a href="${esc(safeUrl(r.링크))}" target="_blank" rel="noopener" style="color:var(--blue);font-weight:600">${esc(r.qia제품명||'')} ↗</a>${sim}`
         : (r.qia제품명 || '-');
     } else if (r.status === 'loading') {
       qiaCell = '<span class="spinner" style="width:12px;height:12px"></span>';
@@ -2885,7 +2890,7 @@ function renderWdTable(totalFiltered) {
 
     let wdCell;
     if (r.status === 'ok') {
-      wdCell = `<strong>${r.휴약기간}</strong>`;
+      wdCell = `<strong>${esc(r.휴약기간)}</strong>`;
     } else if (r.status === 'loading' || r.status === 'pending') {
       wdCell = `<span style="color:${st.cls}">${st.txt}</span>`;
     } else {
@@ -2895,9 +2900,9 @@ function renderWdTable(totalFiltered) {
 
     return `<tr>
       <td class="num" style="color:var(--text3)">${i+1}</td>
-      <td class="hide-mobile">${r.대분류}</td>
-      <td><strong>${r.품명}</strong></td>
-      <td><span class="tag" style="background:${c}22;color:${c}">${r.축종}</span></td>
+      <td class="hide-mobile">${esc(r.대분류)}</td>
+      <td><strong>${esc(r.품명)}</strong></td>
+      <td><span class="tag" style="background:${c}22;color:${c}">${esc(r.축종)}</span></td>
       <td class="num hide-mobile">${fmtNum(r.현재재고)}</td>
       <td class="hide-mobile">${qiaCell}</td>
       <td>${wdCell}</td>
