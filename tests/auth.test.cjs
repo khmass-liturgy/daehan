@@ -3,6 +3,19 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
+
+// auth.js 는 Firebase SDK 를 동적 import() 하므로, 테스트에서 가짜 SDK 모듈(vm.SyntheticModule)을
+// 끼워 넣으려면 Node 에 --experimental-vm-modules 플래그가 필요하다. 플래그 없이 실행되면
+// 모든 테스트가 "SDK 로드 실패" 경로로 빠져 원인 모를 오류로 실패하므로, 플래그를 붙여 자신을 다시 실행한다.
+if (!process.execArgv.includes('--experimental-vm-modules')) {
+  test('auth tests (re-run with --experimental-vm-modules)', () => {
+    const { spawnSync } = require('node:child_process');
+    const r = spawnSync(process.execPath, ['--experimental-vm-modules', '--no-warnings', '--test', __filename], { encoding: 'utf8', env: { ...process.env, NODE_TEST_CONTEXT: undefined } });
+    assert.equal(r.status, 0, (r.stdout || '') + (r.stderr || ''));
+  });
+  return;
+}
+
 const source = fs.readFileSync(path.join(__dirname, '..', 'auth.js'), 'utf8');
 const owner = { email: 'trsumun@gmail.com', email_verified: true, firebase: { sign_in_provider: 'google.com' } };
 const user = claims => ({ getIdTokenResult: async () => ({ claims }) });

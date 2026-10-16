@@ -1,0 +1,8 @@
+{
+  "name": "daehan",
+  "private": true,
+  "description": "대한가축약품 조회 웹앱 (정적 사이트). 의존성 없음 — 테스트만 Node 내장 러너 사용",
+  "scripts": {
+    "test": "node --experimental-vm-modules --no-warnings --test tests/auth.test.cjs"
+  }
+}
