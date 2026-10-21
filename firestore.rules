@@ -23,7 +23,7 @@ service cloud.firestore {
     match /{collection}/{docId} {
       allow read: if isAuthorizedEditor() && collection in [
         '제품', '거래처', '잔액', '전표_세부', '전표_묶음',
-        '메타', '축종매핑', '제품축종'
+        '메타', '축종매핑', '제품축종', '거래처품목'
       ];
       allow create, update: if isAuthorizedEditor() && (
         (collection == '축종매핑' && validMapping('회사', ['양계', '양돈', '축우', '양견', '동물병원/유통', '미분류'])) ||

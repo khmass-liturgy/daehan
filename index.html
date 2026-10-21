@@ -122,7 +122,7 @@ th.bigo{min-width:110px}
 <div id="app">
   <header>
     <div class="logo">대한<span>가축약품</span></div>
-    <div class="badge" id="data-date">-</div>
+    <div style="display:flex;align-items:center;gap:8px"><span id="fs-reads" title="이번 접속에서 읽은 Firestore 문서 수 (무료 한도: 하루 5만건)" style="font-size:10px;color:var(--text3)"></span><div class="badge" id="data-date">-</div></div>
     <button class="toggle-btn" id="logout-btn">로그아웃</button>
   </header>
 
@@ -335,8 +335,101 @@ th.bigo{min-width:110px}
 // ── 상태 ─────────────────────────────────────────
 let stockOnly = false, unpaidOnly = false;
 
+// ── Firestore 읽기 최소화 ─────────────────────────────
+// Firebase 무료 한도(하루 읽기 5만건)를 아끼기 위해, 여러 화면이 공유하는 컬렉션 전체 조회는
+// "접속 중인 탭의 메모리"에만 캐시한다. localStorage/IndexedDB 에는 저장하지 않는다
+// (로그아웃하면 페이지를 새로고침해 모든 캐시를 버리는 보안 구조를 유지하기 위해).
+const FS_TTL = 30 * 60 * 1000;     // 30분 (데이터는 월 단위로 갱신된다)
+const fsStore = new Map();         // key -> { t, p(Promise) }
+const fsFlags = new Map();         // key -> 마지막 표시 시각
+window.__fsReads = 0;
+
+function fsCount(n) {
+  window.__fsReads += n;
+  const el = document.getElementById('fs-reads');
+  if (el) el.textContent = '읽기 ' + window.__fsReads.toLocaleString();
+}
+// getDocs/getDoc 이 실제로 읽은 문서 수를 센다 (헤더에 표시 · 콘솔 window.__fsReads)
+function installReadCounter() {
+  const f = window.fbFuncs;
+  if (!f || f.__counted) return;
+  const g = f.getDocs, d1 = f.getDoc;
+  f.getDocs = async (...a) => { const r = await g(...a); fsCount(r.size != null ? r.size : (r.docs || []).length); return r; };
+  f.getDoc = async (...a) => { const r = await d1(...a); fsCount(1); return r; };
+  f.__counted = true;
+}
+function fsFresh(key) { const t = fsFlags.get(key); return !!t && Date.now() - t < FS_TTL; }
+function fsMark(key) { fsFlags.set(key, Date.now()); }
+// 같은 조회의 반복·동시 호출을 한 번으로 합친다
+async function fsCached(key, loader, ttl = FS_TTL) {
+  const hit = fsStore.get(key);
+  if (hit && Date.now() - hit.t < ttl) return hit.p;
+  const p = Promise.resolve().then(loader);
+  fsStore.set(key, { t: Date.now(), p });
+  try { return await p; } catch (e) { fsStore.delete(key); throw e; }
+}
+// 컬렉션 전체를 한 번만 읽고 snapshot 처럼(docs[].data()) 돌려준다
+async function fsAll(name, max = 2000) {
+  const rows = await fsCached('all:' + name, async () => {
+    const { collection, query, getDocs, limit } = window.fbFuncs;
+    const snap = await getDocs(query(collection(window.fbdb, name), limit(max)));
+    return snap.docs.map(d => ({ __id: d.id, ...d.data() }));
+  });
+  return { size: rows.length, empty: !rows.length,
+           docs: rows.map(r => ({ id: r.__id, data: () => { const { __id, ...x } = r; return x; } })) };
+}
+
+// 거래처별 매출 품목 집계 — 업로더가 최근 2년 매출을 거래처당 문서 1건('거래처품목')으로 미리 계산해 둔다.
+// 예전에는 전표 세부 1만 건을 매번 읽어 이 화면들에서 직접 집계했다(버튼 한 번에 1만 읽기).
+// 아직 업로드 전이라 컬렉션이 비어 있으면 예전 방식으로 딱 한 번만 읽어(캐시) 같은 모양으로 집계한다.
+function aggregateSalesRows(rows) {
+  const byCo = new Map();
+  for (const r of rows) {
+    if (!r.회사 || !r.품명) continue;
+    const co = byCo.get(r.회사) || new Map();
+    const it = co.get(r.품명) || { 품명: r.품명, 대분류: r.대분류 || '', 횟수: 0, 수량: 0, 금액: 0, 최근일: '', 최근단가: 0 };
+    it.횟수 += 1; it.수량 += (+r.수량 || 0); it.금액 += (+r.공급가액 || 0);
+    if ((r.날짜 || '') >= it.최근일) { it.최근일 = r.날짜 || ''; it.최근단가 = +r.단가 || 0; if (r.대분류) it.대분류 = r.대분류; }
+    co.set(r.품명, it); byCo.set(r.회사, co);
+  }
+  return [...byCo].map(([회사, m]) => ({ 회사, 품목: [...m.values()] }));
+}
+async function loadCompanyItems() {
+  return fsCached('companyItems', async () => {
+    let docs = [];
+    try {
+      const snap = await fsAll('거래처품목', 1000);
+      docs = snap.docs.map(d => d.data());
+    } catch (e) {
+      // 보안 규칙에 아직 이 컬렉션이 게시되지 않았거나 읽기 실패 → 예전 방식(전표 세부 집계)으로 대체
+      console.warn('거래처품목 읽기 실패, 전표 세부로 대체합니다', e);
+      fsStore.delete('all:거래처품목');
+    }
+    if (docs.length) {
+      // 같은 업로드(배치)의 문서만 사용 — 더 이상 매출이 없는 거래처의 옛 문서는 무시
+      const latest = docs.reduce((m, r) => ((r.배치 || '') > m ? (r.배치 || '') : m), '');
+      return docs.filter(r => (r.배치 || '') === latest);
+    }
+    const { collection, query, getDocs, where, orderBy, limit } = window.fbFuncs;
+    const old = await getDocs(query(collection(window.fbdb, '전표_세부'), where('계정', '==', '매출'), orderBy('날짜', 'desc'), limit(10000)));
+    return aggregateSalesRows(old.docs.map(d => d.data()));
+  });
+}
+// 입력한 거래처명이 정확히 일치하지 않을 때, 이미 캐시된 거래처 목록에서 이름이 포함된 후보를 찾는다
+// (예전에는 최근 전표 5000건을 통째로 읽어 이름을 걸러냈다)
+async function matchCompanyNames(kw) {
+  const [cust, bal] = await Promise.all([fsAll('거래처'), fsAll('잔액')]);
+  const low = String(kw).toLowerCase(), names = new Set();
+  for (const d of [...cust.docs, ...bal.docs]) {
+    const n = d.data().회사;
+    if (n && n.toLowerCase().includes(low)) names.add(n);
+  }
+  return [...names];
+}
+
 // auth.js에서 승인된 로그인 확인 후 한 번만 호출합니다.
 window.startApp = function() {
+  installReadCounter();
   loadUploadInfo();  // 데이터 업데이트 일자 표시
   loadCategoryMap();  // 축종 매핑 로드 (백그라운드)
   loadProductSpecies();  // 제품 축종 로드
@@ -496,14 +589,15 @@ let 제품축종 = {};  // { 품명: '양계' | '양돈' | '축우' | '공통' }
 
 // 제품 축종 매핑 로드
 async function loadProductSpecies() {
-  const { collection, query, getDocs, limit } = window.fbFuncs;
+  if (fsFresh('map:제품축종')) return;   // 편집은 제품축종 객체를 직접 갱신하므로 다시 읽을 필요가 없다
   try {
-    const snap = await getDocs(query(collection(window.fbdb, '제품축종'), limit(3000)));
+    const snap = await fsAll('제품축종', 3000);
     제품축종 = {};
     snap.docs.forEach(d => {
       const r = d.data();
       if (r.품명 && r.축종) 제품축종[r.품명] = r.축종;
     });
+    fsMark('map:제품축종');
     console.log(`제품축종 로드: ${Object.keys(제품축종).length}개`);
   } catch(e) {
     console.warn('제품축종 로드 실패', e);
@@ -632,9 +726,8 @@ window.setStockMode = setStockMode;
 // 제조사 목록 로드 (드롭다운 채우기)
 async function loadMfgList() {
   if (mfgListLoaded) return;
-  const { collection, query, getDocs, limit } = window.fbFuncs;
   try {
-    const snap = await getDocs(query(collection(window.fbdb, '제품'), limit(1200)));
+    const snap = await fsAll('제품', 2000);
     const mfgs = new Set();
     snap.docs.forEach(d => {
       const m = d.data().대분류;
@@ -667,14 +760,10 @@ async function searchStock() {
   const coll = collection(window.fbdb, '제품');
 
   try {
-    let snap;
-    if (stockOnly) {
-      snap = await getDocs(query(coll, where('현재재고', '>', 0), limit(1200)));
-    } else {
-      snap = await getDocs(query(coll, limit(1200)));
-    }
-
+    // 제품 전체를 접속당 한 번만 읽어 두고 재고/제조사/축종/검색어 필터는 모두 메모리에서 처리한다
+    const snap = await fsAll('제품', 2000);
     let items = snap.docs.map(d => d.data());
+    if (stockOnly) items = items.filter(r => (+r.현재재고 || 0) > 0);
 
     // 대분류 'A' (미분류) 품목은 목록에서 제외
     items = items.filter(r => r.대분류 !== 'A');
@@ -782,38 +871,34 @@ async function searchCustProducts() {
   const coll = collection(window.fbdb, '전표_세부');
 
   try {
-    // 해당 거래처의 매출(=거래처가 구매) 세부 내역
-    const snap = await getDocs(query(coll, where('회사','==',company), where('계정','==','매출'), orderBy('날짜','desc'), limit(3000)));
-    let details = snap.docs.map(d => d.data());
-
-    // 회사명 부분일치 재시도 (정확 매칭 실패 시)
-    if (!details.length) {
-      const allSnap = await getDocs(query(coll, where('계정','==','매출'), orderBy('날짜','desc'), limit(5000)));
+    // 거래처별 매출 품목 집계(거래처품목)에서 바로 계산 — 전표 세부를 읽지 않는다
+    const companies = await loadCompanyItems();
+    let hits = companies.filter(c => c.회사 === company);
+    if (!hits.length) {   // 정확 일치가 없으면 이름 부분 일치
       const kw = company.toLowerCase();
-      details = allSnap.docs.map(d => d.data()).filter(r => (r.회사||'').toLowerCase().includes(kw));
+      hits = companies.filter(c => (c.회사 || '').toLowerCase().includes(kw));
     }
-
-    if (!details.length) {
+    if (!hits.length) {
       document.getElementById('stock-result').innerHTML = `<div class="empty">${esc(company)}의 구매 내역이 없습니다</div>`;
       return;
     }
 
-    // 품명별 집계
+    // 품명별 합산 (부분 일치로 여러 거래처가 걸리면 합친다)
     const prodMap = new Map();
-    details.forEach(r => {
-      const key = r.품명 || '(미상)';
-      const cur = prodMap.get(key) || { 품명:key, 대분류:r.대분류||'', 구매횟수:0, 총수량:0, 최근구매:'', 최근단가:0 };
-      cur.구매횟수 += 1;
-      cur.총수량 += (+r.수량||0);
-      if ((r.날짜||'') > cur.최근구매) {
-        cur.최근구매 = r.날짜 || '';
-        cur.최근단가 = +r.단가 || 0;
+    let 총구매횟수 = 0;
+    for (const c of hits) {
+      for (const it of c.품목 || []) {
+        const cur = prodMap.get(it.품명) || { 품명: it.품명, 대분류: it.대분류 || '', 구매횟수: 0, 총수량: 0, 최근구매: '', 최근단가: 0 };
+        cur.구매횟수 += (+it.횟수 || 0);
+        cur.총수량 += (+it.수량 || 0);
+        총구매횟수 += (+it.횟수 || 0);
+        if ((it.최근일 || '') >= cur.최근구매) { cur.최근구매 = it.최근일 || ''; cur.최근단가 = +it.최근단가 || 0; }
+        prodMap.set(it.품명, cur);
       }
-      prodMap.set(key, cur);
-    });
+    }
 
-    custProdItems = [...prodMap.values()];
-    custProdInfo = { 실제거래처: details[0].회사, 총구매횟수: details.length };
+    custProdItems = [...prodMap.values()].sort((a, b) => (b.최근구매 || '').localeCompare(a.최근구매 || ''));   // 동점 시 최근 구매 품목이 먼저
+    custProdInfo = { 실제거래처: hits[0].회사, 총구매횟수 };
     renderCustProdResult();
   } catch(e) {
     document.getElementById('stock-result').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
@@ -902,31 +987,26 @@ async function showProductBuyers(품명) {
   const { collection, query, getDocs, where, limit } = window.fbFuncs;
 
   try {
-    // 품명 단일 필드 일치 조건만 사용 (복합 색인 불필요) → 계정/정렬은 클라이언트에서 처리
-    const snap = await getDocs(query(collection(window.fbdb,'전표_세부'), where('품명','==',품명), limit(3000)));
-    const sales = snap.docs.map(d => d.data()).filter(r => r.계정 === '매출');
+    // 거래처별 매출 품목 집계에서 이 품목을 산 거래처를 찾는다 (전표 세부를 읽지 않음)
+    const companies = await loadCompanyItems();
+    const farms = [];
+    for (const c of companies) {
+      const it = (c.품목 || []).find(x => x.품명 === 품명);
+      if (it) farms.push({ 회사: c.회사 || '(미상)', 구매횟수: +it.횟수 || 0, 총수량: +it.수량 || 0, 최근구매: it.최근일 || '' });
+    }
 
-    if (!sales.length) {
+    if (!farms.length) {
       document.getElementById('pb-sub').textContent = '구매 이력 없음';
-      document.getElementById('pb-body').innerHTML = `<div class="empty">이 제품을 구매한 거래처가 없습니다<br><span style="font-size:11px">(최근 1년치 데이터 기준)</span></div>`;
+      document.getElementById('pb-body').innerHTML = `<div class="empty">이 제품을 구매한 거래처가 없습니다<br><span style="font-size:11px">(최근 2년치 데이터 기준)</span></div>`;
       return;
     }
 
-    // 거래처별 집계
-    const map = new Map();
-    sales.forEach(r => {
-      const key = r.회사 || '(미상)';
-      const cur = map.get(key) || { 회사:key, 구매횟수:0, 총수량:0, 최근구매:'' };
-      cur.구매횟수 += 1;
-      cur.총수량 += (+r.수량||0);
-      if ((r.날짜||'') > cur.최근구매) cur.최근구매 = r.날짜 || '';
-      map.set(key, cur);
-    });
-
+    farms.sort((a, b) => (b.최근구매 || '').localeCompare(a.최근구매 || ''));   // 동점 시 최근 구매 거래처가 먼저
+    const map = new Map(farms.map(f => [f.회사, f]));
     pbFarms = [...map.values()];
     pbSort = { key: '구매횟수', dir: 'desc' };
 
-    document.getElementById('pb-sub').textContent = `${pbFarms.length}개 거래처 구매 (최근 1년치 데이터 기준)`;
+    document.getElementById('pb-sub').textContent = `${pbFarms.length}개 거래처 구매 (최근 2년치 데이터 기준)`;
     renderProductBuyers();
   } catch(e) {
     document.getElementById('pb-body').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
@@ -996,10 +1076,7 @@ async function searchBalance() {
     // 잔액 컬렉션 (미리 전체 기간으로 계산되어 저장됨) + 거래처 마스터 병렬 조회
     const balColl = collection(window.fbdb, '잔액');
     const custColl = collection(window.fbdb, '거래처');
-    const [balSnap, custSnap] = await Promise.all([
-      getDocs(query(balColl, orderBy('잔액', 'desc'), limit(1000))),
-      getDocs(query(custColl, limit(2000)))
-    ]);
+    const [balSnap, custSnap] = await Promise.all([fsAll('잔액'), fsAll('거래처')]);
 
     // 거래처 마스터 → 회사명별 이름/전화 매핑
     const custMap = new Map();
@@ -1293,12 +1370,30 @@ async function searchTxn() {
         const exactSnap = await getDocs(query(headColl, where('회사', '==', company), limit(5000)));
         hdocs = exactSnap.docs.map(d => d.data());
         if (!hdocs.length) {
-          const snap = await getDocs(query(headColl, limit(5000)));
-          const kw = company.toLowerCase();
-          hdocs = snap.docs.map(d => d.data()).filter(r => (r.회사||'').toLowerCase().includes(kw));
+          const names = await matchCompanyNames(company);
+          if (names.length && names.length <= 8) {
+            for (const nm of names) {
+              const part = await getDocs(query(headColl, where('회사', '==', nm), limit(5000)));
+              hdocs = hdocs.concat(part.docs.map(d => d.data()));
+            }
+          } else {
+            const snap = await getDocs(query(headColl, limit(5000)));   // 예전 방식 폴백
+            const kw = company.toLowerCase();
+            hdocs = snap.docs.map(d => d.data()).filter(r => (r.회사||'').toLowerCase().includes(kw));
+          }
         }
       } else {
-        const snap = await getDocs(query(headColl, limit(5000)));
+        // 기간을 정하지 않았으면 최근 31일만 조회한다 (예전에는 기간·정렬 없이 임의의 5000건을 읽었다)
+        let f = from;
+        if (!f && !to) {
+          const d0 = new Date(); d0.setDate(d0.getDate() - 31);
+          f = d0.getFullYear() + '-' + String(d0.getMonth() + 1).padStart(2, '0') + '-' + String(d0.getDate()).padStart(2, '0');
+          document.getElementById('txn-from').value = f;
+        }
+        const cs = [];
+        if (f) cs.push(where('날짜', '>=', f));
+        if (to) cs.push(where('날짜', '<=', to));
+        const snap = await getDocs(query(headColl, ...cs, limit(5000)));
         hdocs = snap.docs.map(d => d.data());
       }
       items = hdocs
@@ -1315,25 +1410,40 @@ async function searchTxn() {
         exactConstraints.push(...dateWhere());
         exactConstraints.push(orderBy('날짜', 'desc'));
         exactConstraints.push(limit(5000));
-        const exactSnap = await getDocs(query(coll, ...exactConstraints));
-        items = exactSnap.docs.map(d => d.data());
+        // 같은 조건의 재검색(정렬·엑셀·탭 이동 후 복귀 등)은 메모리 캐시에서 처리 (10분)
+        const sig = ['txn', company, acct, from, to].join('|');
+        const cachedRows = await fsCached(sig, async () => {
+          const exactSnap = await getDocs(query(coll, ...exactConstraints));
+          return exactSnap.docs.map(d => d.data());
+        }, 10 * 60 * 1000);
+        items = cachedRows.slice();
       } catch(e) { console.warn('정확 일치 조회 실패, 부분 일치로 재시도', e); }
       items.forEach(r => matchedCompanies.add(r.회사));
 
       if (!items.length) {
-        // 2단계: 정확히 일치하는 거래처가 없으면 최근 거래 중 이름 부분 일치로 재시도
-        // (주의: 최근 5000건 범위 밖의 오래된 거래는 이 경로로는 찾지 못할 수 있음)
-        let constraints = [];
-        if (acct) constraints.push(where('계정', '==', acct));
-        constraints.push(...dateWhere());
-        constraints.push(orderBy('날짜', 'desc'));
-        constraints.push(limit(5000));
+        // 2단계: 정확히 일치하는 거래처가 없으면, 캐시된 거래처 목록에서 이름이 포함된 후보를 찾아
+        // 그 거래처들만 정확 조회한다. 후보가 없거나(거래처 목록에 없는 매입처 등) 너무 많을 때만
+        // 예전처럼 최근 전표 5000건에서 이름을 검색한다.
+        const names = await matchCompanyNames(company);
+        if (names.length && names.length <= 8) {
+          for (const nm of names) {
+            const cs = [where('회사', '==', nm)];
+            if (acct) cs.push(where('계정', '==', acct));
+            cs.push(...dateWhere(), orderBy('날짜', 'desc'), limit(5000));
+            const part = await getDocs(query(coll, ...cs));
+            items = items.concat(part.docs.map(d => d.data()));
+          }
+        } else {
+          let constraints = [];
+          if (acct) constraints.push(where('계정', '==', acct));
+          constraints.push(...dateWhere());
+          constraints.push(orderBy('날짜', 'desc'));
+          constraints.push(limit(5000));
 
-        const snap = await getDocs(query(coll, ...constraints));
-        const allDocs = snap.docs.map(d => d.data());
-
-        const kw = company.toLowerCase();
-        items = allDocs.filter(r => (r.회사||'').toLowerCase().includes(kw));
+          const snap = await getDocs(query(coll, ...constraints));
+          const kw = company.toLowerCase();
+          items = snap.docs.map(d => d.data()).filter(r => (r.회사||'').toLowerCase().includes(kw));
+        }
         items.forEach(r => matchedCompanies.add(r.회사));
       }
     } else {
@@ -1362,13 +1472,15 @@ async function searchTxn() {
       targetCompany = [...matchedCompanies][0];
       const headColl = collection(window.fbdb, '전표_묶음');
       const balColl = collection(window.fbdb, '잔액');
-      const [hsnap, bsnap] = await Promise.all([
-        getDocs(query(headColl, where('회사','==',targetCompany), orderBy('날짜','asc'), limit(5000))),
+      const [hrows, bsnap] = await Promise.all([
+        fsCached('heads:' + targetCompany, async () => {
+          const hs = await getDocs(query(headColl, where('회사','==',targetCompany), orderBy('날짜','asc'), limit(5000)));
+          return hs.docs.map(d => d.data());
+        }, 10 * 60 * 1000),
         getDocs(query(balColl, where('회사','==',targetCompany), limit(1)))
       ]);
       // ERP 원본이 계산한 명세표 잔액누계를 그대로 사용
-      hsnap.docs.forEach(d => {
-        const r = d.data();
+      hrows.forEach(r => {
         if (r.전표번호) balanceMap[r.전표번호] = (+r.잔액누계 || 0);
       });
       if (!bsnap.empty) finalBalance = bsnap.docs[0].data();
@@ -1376,8 +1488,7 @@ async function searchTxn() {
 
       // 계정 필터가 없을 때(전체 보기)만 수금/지급 내역을 함께 섞어서 보여줌
       if (!product && !acct) {
-        const cashRows = hsnap.docs
-          .map(d => d.data())
+        const cashRows = hrows
           .filter(r => CASH_ACCTS.includes(r.계정))
           .filter(r => (!from || r.날짜 >= from) && (!to || r.날짜 <= to))
           .map(cashRow);
@@ -1502,14 +1613,15 @@ let 거래처추론축종 = {};  // { 회사명: '양계' } - 제품 구매이�
 
 // 축종 매핑 Firestore에서 로드
 async function loadCategoryMap() {
-  const { collection, query, getDocs, limit } = window.fbFuncs;
+  if (fsFresh('map:축종매핑')) return;
   try {
-    const snap = await getDocs(query(collection(window.fbdb, '축종매핑'), limit(2000)));
+    const snap = await fsAll('축종매핑', 2000);
     축종매핑 = {};
     snap.docs.forEach(d => {
       const r = d.data();
       if (r.회사 && r.축종) 축종매핑[r.회사] = r.축종;
     });
+    fsMark('map:축종매핑');
     console.log(`축종매핑 로드: ${Object.keys(축종매핑).length}개`);
   } catch(e) {
     console.warn('축종매핑 로드 실패', e);
@@ -1526,28 +1638,28 @@ async function inferCompanySpecies() {
     // 지정된 제품이 하나도 없으면 추론 불가
     if (Object.keys(제품축종).length === 0) { 거래처추론축종 = {}; return; }
     
-    // 매출 세부내역 전체 조회
-    const snap = await getDocs(query(collection(window.fbdb,'전표_세부'), where('계정','==','매출'), orderBy('날짜','desc'), limit(10000)));
-    
-    // 회사별 축종 카운트
+    // 거래처별 매출 품목 집계(거래처품목)로 계산 — 전표 세부 1만 건을 읽던 것을 대체
+    const companies = await loadCompanyItems();
     const counter = {};  // { 회사: { 양계: n, 양돈: n, 축우: n } }
-    snap.docs.forEach(d => {
-      const r = d.data();
-      const 회사 = r.회사; const 품명 = r.품명;
-      if (!회사 || !품명) return;
-      const sp = 제품축종[품명];
-      // 양계/양돈/축우만 카운트 (공통/미지정 제외)
-      if (sp !== '양계' && sp !== '양돈' && sp !== '축우') return;
-      counter[회사] = counter[회사] || {};
-      counter[회사][sp] = (counter[회사][sp] || 0) + 1;
-    });
-    
+    const lastBuy = {};  // { 회사: { 양계: '최근 구매일' } } — 동점일 때 최근에 산 축종을 고르기 위함
+    for (const c of companies) {
+      for (const it of c.품목 || []) {
+        const sp = 제품축종[it.품명];
+        // 양계/양돈/축우만 카운트 (공통/미지정 제외)
+        if (sp !== '양계' && sp !== '양돈' && sp !== '축우') continue;
+        counter[c.회사] = counter[c.회사] || {};
+        counter[c.회사][sp] = (counter[c.회사][sp] || 0) + (+it.횟수 || 0);
+        lastBuy[c.회사] = lastBuy[c.회사] || {};
+        if ((it.최근일 || '') > (lastBuy[c.회사][sp] || '')) lastBuy[c.회사][sp] = it.최근일 || '';
+      }
+    }
+
     // 가장 많은 축종으로 결정
     거래처추론축종 = {};
     for (const [회사, counts] of Object.entries(counter)) {
       let best = null, bestN = 0;
       for (const [sp, n] of Object.entries(counts)) {
-        if (n > bestN) { best = sp; bestN = n; }
+        if (n > bestN || (n === bestN && (lastBuy[회사][sp] || '') > (lastBuy[회사][best] || ''))) { best = sp; bestN = n; }
       }
       if (best) 거래처추론축종[회사] = best;
     }
@@ -1699,10 +1811,7 @@ async function searchInactive() {
     // 잔액 컬렉션 (전체 기간 반영) + 거래처 마스터 병렬 조회
     const balColl = collection(window.fbdb, '잔액');
     const custColl = collection(window.fbdb, '거래처');
-    const [balSnap, custSnap] = await Promise.all([
-      getDocs(query(balColl, limit(2000))),
-      getDocs(query(custColl, limit(2000)))
-    ]);
+    const [balSnap, custSnap] = await Promise.all([fsAll('잔액'), fsAll('거래처')]);
     
     // 거래처 정보 맵
     const custMap = new Map();
@@ -1900,10 +2009,7 @@ async function searchSalesRank() {
 
     const balColl = collection(window.fbdb, '잔액');
     const custColl = collection(window.fbdb, '거래처');
-    const [balSnap, custSnap] = await Promise.all([
-      getDocs(query(balColl, limit(2000))),
-      getDocs(query(custColl, limit(2000)))
-    ]);
+    const [balSnap, custSnap] = await Promise.all([fsAll('잔액'), fsAll('거래처')]);
 
     const custMap = new Map();
     custSnap.docs.forEach(d => {
@@ -2063,10 +2169,7 @@ async function searchProdAnalysis() {
   try {
     await loadProductSpecies();  // 제품축종 수동 매핑 캐시 최신화
 
-    const [salesSnap, prodSnap] = await Promise.all([
-      getDocs(query(collection(window.fbdb,'전표_세부'), where('계정','==','매출'), orderBy('날짜','desc'), limit(10000))),
-      getDocs(query(collection(window.fbdb,'제품'), limit(1200)))
-    ]);
+    const [companies, prodSnap] = await Promise.all([loadCompanyItems(), fsAll('제품', 2000)]);
 
     // 제품 정보 맵 (품명 → 제조사 / 현재재고)
     const prodInfo = new Map();
@@ -2075,24 +2178,17 @@ async function searchProdAnalysis() {
       if (r.품명) prodInfo.set(r.품명, { 대분류: r.대분류 || '', 현재재고: +r.현재재고 || 0 });
     });
 
-    // 품명별 집계: 매출금액 / 판매수량 / 거래처별 구매수량·횟수
+    // 품명별 집계: 매출금액 / 판매수량 / 거래처별 구매수량·횟수 (거래처품목 집계를 품명 기준으로 합산)
     const map = new Map();
-    salesSnap.docs.forEach(d => {
-      const r = d.data();
-      const 품명 = r.품명;
-      if (!품명) return;
-      const cur = map.get(품명) || { 품명, 매출금액: 0, 판매수량: 0, 거래처맵: new Map() };
-      cur.매출금액 += (+r.공급가액 || 0);
-      cur.판매수량 += (+r.수량 || 0);
-      if (r.회사) {
-        const cm = cur.거래처맵;
-        const c = cm.get(r.회사) || { 수량: 0, 횟수: 0 };
-        c.수량 += (+r.수량 || 0);
-        c.횟수 += 1;
-        cm.set(r.회사, c);
+    for (const c of companies) {
+      for (const it of c.품목 || []) {
+        const cur = map.get(it.품명) || { 품명: it.품명, 매출금액: 0, 판매수량: 0, 거래처맵: new Map() };
+        cur.매출금액 += (+it.금액 || 0);
+        cur.판매수량 += (+it.수량 || 0);
+        cur.거래처맵.set(c.회사, { 수량: +it.수량 || 0, 횟수: +it.횟수 || 0, 최근일: it.최근일 || '' });
+        map.set(it.품명, cur);
       }
-      map.set(품명, cur);
-    });
+    }
 
     // 품목별 최종 데이터 구성 (거래처별 구매수량이 가장 많은 곳 = "제일 많이 사용한 거래처")
     const 전체목록 = [...map.values()].map(r => {
@@ -2100,7 +2196,7 @@ async function searchProdAnalysis() {
       const 축종 = 제품축종[r.품명] || classifyProduct(r.품명);
       let 최다구매거래처 = '', 최다구매수량 = 0, 최다구매횟수 = 0;
       for (const [회사, c] of r.거래처맵) {
-        if (c.수량 > 최다구매수량) { 최다구매거래처 = 회사; 최다구매수량 = c.수량; 최다구매횟수 = c.횟수; }
+        if (c.수량 > 최다구매수량 || (c.수량 === 최다구매수량 && 최다구매거래처 && c.최근일 > (r.거래처맵.get(최다구매거래처).최근일 || ''))) { 최다구매거래처 = 회사; 최다구매수량 = c.수량; 최다구매횟수 = c.횟수; }
       }
       const 현재재고 = info.현재재고 ?? 0;
       return {
@@ -2189,7 +2285,7 @@ function renderProdAnalysis() {
     </div>
     ${alertBanner}
     <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
-      ${paSpecies === 'all' ? '전체' : paSpecies} · 매출 상위 ${paItems.length}개 (해당 축종 ${paFilteredCount}개 중) · 최근 1년 매출 기준 · 헤더 클릭시 정렬 · 품명 클릭시 구매처 전체 보기
+      ${paSpecies === 'all' ? '전체' : paSpecies} · 매출 상위 ${paItems.length}개 (해당 축종 ${paFilteredCount}개 중) · 최근 2년 매출 기준 · 헤더 클릭시 정렬 · 품명 클릭시 구매처 전체 보기
     </div>
     <div class="tbl-wrap"><table>
       <thead><tr>
@@ -2227,10 +2323,7 @@ async function searchInfo() {
   const balColl = collection(window.fbdb, '잔액');
 
   try {
-    const [custSnap, balSnap] = await Promise.all([
-      getDocs(query(custColl, limit(2000))),
-      getDocs(query(balColl, limit(2000)))
-    ]);
+    const [custSnap, balSnap] = await Promise.all([fsAll('거래처'), fsAll('잔액')]);
 
     // 회사별 최종매출일 매핑
     const lastSaleMap = new Map();
@@ -2787,9 +2880,8 @@ async function wdLookupOne(품명) {
 
 // 우리 제품 목록(제품 컬렉션) 로드 — QIA 호출 없이 빠르게 필터링 가능한 형태로 보관
 async function loadWdProducts() {
-  const { collection, query, getDocs, limit } = window.fbFuncs;
   await loadProductSpecies();
-  const snap = await getDocs(query(collection(window.fbdb, '제품'), limit(1200)));
+  const snap = await fsAll('제품', 2000);
   wdRawProducts = snap.docs.map(d => {
     const r = d.data();
     return {
