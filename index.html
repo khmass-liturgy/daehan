@@ -93,6 +93,7 @@ tr:hover td{background:var(--bg3)}
 .tag-재고있음{background:#0f2d1f;color:var(--green)}
 .tag-재고없음{background:#2d1010;color:var(--red)}
 .tag-외상{background:#1e1e3a;color:var(--purple)}
+.tag-할인{background:#2a1a3a;color:var(--purple)}
 .tag-현금{background:#1a2d1a;color:var(--green)}
 
 .empty{text-align:center;padding:48px 0;color:var(--text3);font-size:13px}
@@ -1235,6 +1236,28 @@ function bigoCell(r) {
   return a + b;
 }
 
+// 수금 할인 계산: ERP는 수금 전표에 할인액을 따로 저장하지 않고 잔액누계에만 반영한다.
+// 같은 거래처의 직전 전표 잔액누계 - 입금액 - 이 수금 전표의 잔액누계 가 양수이면 그만큼이 할인이다.
+// (거래처의 전체 전표가 들어 있어야 정확하다) → Map(전표번호 → 할인액)
+function deriveDiscounts(heads) {
+  const byCo = new Map();
+  for (const r of heads) { const a = byCo.get(r.회사) || []; a.push(r); byCo.set(r.회사, a); }
+  const out = new Map();
+  for (const arr of byCo.values()) {
+    arr.sort((a, b) => (a.날짜 || '').localeCompare(b.날짜 || '') || (a.전표번호 || '').localeCompare(b.전표번호 || ''));
+    let prev = null;
+    for (const r of arr) {
+      const bal = +r.잔액누계 || 0;
+      if (r.계정 === '수금' && prev !== null && r.전표번호) {
+        const d = prev - (+r.입금액 || 0) - bal;
+        if (d > 0) out.set(r.전표번호, d);
+      }
+      prev = bal;
+    }
+  }
+  return out;
+}
+
 // 기간 프리셋
 function setTxnRange(kind) {
   const d = new Date();
@@ -1353,8 +1376,8 @@ function balanceStatementHtml(company, fb, res, period) {
       const rows = inv.lines.map(r => `<tr>
           <td>${esc(inv.날짜)}</td>
           <td>${esc(r.품명 || '-')}</td>
-          <td class="n">${+r.수량 > 0 ? fmtNum(r.수량) : '-'}</td>
-          <td class="n">${+r.단가 > 0 ? fmtNum(r.단가) : '-'}</td>
+          <td class="n">${+r.수량 ? fmtNum(r.수량) : '-'}</td>
+          <td class="n">${+r.단가 ? fmtNum(r.단가) : '-'}</td>
           <td class="n">${fmtNum((+r.공급가액 || 0) + (+r.세액 || 0))}</td>
         </tr>`).join('');
       const sub = inv.partial
@@ -1387,8 +1410,8 @@ function balanceStatementHtml(company, fb, res, period) {
         <td>${esc(r.날짜 || '')}</td>
         <td>${esc(r.계정 || '')}</td>
         <td>${esc(r.품명 || '-')}</td>
-        <td class="n">${+r.수량 > 0 ? fmtNum(r.수량) : '-'}</td>
-        <td class="n">${+r.단가 > 0 ? fmtNum(r.단가) : '-'}</td>
+        <td class="n">${+r.수량 ? fmtNum(r.수량) : '-'}</td>
+        <td class="n">${+r.단가 ? fmtNum(r.단가) : '-'}</td>
         <td class="n">${fmtNum((+r.공급가액 || 0) + (+r.세액 || 0))}</td>
         ${showBalance ? `<td class="n">${bal === undefined ? '-' : fmtNum(bal)}</td>` : ''}
       </tr>`;
@@ -1581,16 +1604,29 @@ async function searchTxn() {
       품명: r.결재수단 ? `${r.계정} (${r.결재수단})` : r.계정,
       수량: 0, 단가: 0,
       공급가액: r.계정 === '수금' ? (+r.입금액 || 0) : (+r.출금액 || 0),
-      전표번호: r.전표번호
+      전표번호: r.전표번호,
+      비고: r.비고 || ''
     });
+    // 수금 때 깎아 준 할인: ERP는 별도 금액으로 저장하지 않으므로 잔액 차이로 계산한 값(discMap)을 별도 행으로 보여준다
+    const discRow = (r, amt) => ({
+      날짜: r.날짜, 회사: r.회사, 계정: '할인', 품명: '수금 할인',
+      수량: 0, 단가: 0, 공급가액: amt, 전표번호: r.전표번호,
+      비고: '수금 시 잔액에서 차감된 금액 (잔액 차이로 계산)'
+    });
+    const discRowsFor = (heads, discMap) => heads
+      .filter(r => r.계정 === '수금' && discMap.get(r.전표번호) > 0)
+      .filter(r => (!from || r.날짜 >= from) && (!to || r.날짜 <= to))
+      .map(r => discRow(r, discMap.get(r.전표번호)));
 
     if (CASH_ACCTS.includes(acct)) {
       // 계정을 수금/지급으로 직접 선택한 경우: 전표_묶음 헤더에서 조회
       const headColl = collection(window.fbdb, '전표_묶음');
       let hdocs = [];
+      let fullHist = false;   // 거래처별 전체 전표를 읽었을 때만 할인(잔액 차이) 계산이 가능
       if (company) {
         const exactSnap = await getDocs(query(headColl, where('회사', '==', company), limit(5000)));
         hdocs = exactSnap.docs.map(d => d.data());
+        fullHist = true;
         if (!hdocs.length) {
           const names = await matchCompanyNames(company);
           if (names.length && names.length <= 8) {
@@ -1599,6 +1635,7 @@ async function searchTxn() {
               hdocs = hdocs.concat(part.docs.map(d => d.data()));
             }
           } else {
+            fullHist = false;
             const snap = await getDocs(query(headColl, limit(5000)));   // 예전 방식 폴백
             const kw = company.toLowerCase();
             hdocs = snap.docs.map(d => d.data()).filter(r => (r.회사||'').toLowerCase().includes(kw));
@@ -1621,8 +1658,9 @@ async function searchTxn() {
       items = hdocs
         .filter(r => r.계정 === acct)
         .filter(r => (!from || r.날짜 >= from) && (!to || r.날짜 <= to))
-        .map(cashRow)
-        .sort((a,b) => (b.날짜||'').localeCompare(a.날짜||''));
+        .map(cashRow);
+      if (acct === '수금' && fullHist) items = items.concat(discRowsFor(hdocs, deriveDiscounts(hdocs)));
+      items.sort((a,b) => (b.날짜||'').localeCompare(a.날짜||''));
       items.forEach(r => matchedCompanies.add(r.회사));
     } else if (company) {
       // 1단계: 정확한 거래처명으로 직접 조회 시도 (오래된 거래도 누락 없이 전부 잡힘)
@@ -1714,7 +1752,7 @@ async function searchTxn() {
           .filter(r => CASH_ACCTS.includes(r.계정))
           .filter(r => (!from || r.날짜 >= from) && (!to || r.날짜 <= to))
           .map(cashRow);
-        items = items.concat(cashRows);
+        items = items.concat(cashRows, discRowsFor(hrows, deriveDiscounts(hrows)));
       }
     }
 
@@ -1744,9 +1782,9 @@ function renderTxnResult() {
       <td><strong>${esc(r.회사||'')}</strong></td>
       <td><span class="tag ${tagCls}">${esc(r.계정||'')}</span></td>
       <td>${esc(r.품명||'-')}</td>
-      <td class="num hide-mobile">${r.수량>0?fmtNum(r.수량):'-'}</td>
-      <td class="num hide-mobile">${r.단가>0?fmtNum(r.단가):'-'}</td>
-      <td class="num">${r.공급가액>0?fmtNum(r.공급가액):'-'}</td>
+      <td class="num hide-mobile">${+r.수량?fmtNum(r.수량):'-'}</td>
+      <td class="num hide-mobile">${+r.단가?fmtNum(r.단가):'-'}</td>
+      <td class="num">${+r.공급가액?fmtNum(r.공급가액):'-'}</td>
       ${balCell}
       <td class="bigo">${bigoCell(r)}</td>
     </tr>`;
