@@ -251,6 +251,7 @@ th.bigo{min-width:110px}
         <button class="toggle-btn" onclick="setTxnRange('clear')">기간 해제</button>
         <button class="search-btn" id="txn-excel-btn" onclick="exportTxnExcel()" style="background:var(--green)">엑셀 내보내기</button>
         <button class="search-btn" id="txn-balpdf-btn" onclick="exportBalancePdf()" style="background:var(--amber);color:#1a1a1a" title="거래처 한 곳을 검색한 상태에서, 현재 잔액에 해당하는 매출 내역과 조회된 기간별 거래내역을 함께 PDF로 저장">잔액·기간내역 PDF</button>
+        <button class="search-btn" id="txn-balimg-btn" onclick="exportBalanceImage()" style="background:var(--purple)" title="잔액·기간내역 PDF와 같은 내용을 이미지(PNG)로 저장">이미지 저장</button>
       </div>
       <div id="txn-result"></div>
     </div>
@@ -327,6 +328,7 @@ th.bigo{min-width:110px}
 </div>
 
 <!-- 엑셀 내보내기 (SheetJS) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" integrity="sha512-BNaRQnYJYiPSqHHDb58B0yaPfCu+Wgds8Gp/gU33kqBtgNS4tSPHuGibyoeqMV/TJlSKda6FXzoEyYGjTe+vXA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha512-r22gChDnGvBylk90+2e/ycr3RVrDi8DIOkIGNhJlKfuyQM4tIRAI062MaV8sfjQKYVGjOBaZBOA87z+IhZE9DA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
 <!-- Firebase SDK -->
@@ -1434,39 +1436,46 @@ function balanceStatementHtml(company, fb, res, period) {
 </body></html>`;
 }
 
-async function exportBalancePdf() {
+// PDF·이미지가 공유하는 내역서 HTML 생성 (거래처 한 곳 검색 상태가 아니면 null)
+async function buildBalanceStatement() {
   const ctx = txnCtx;
   if (!ctx || !ctx.targetCompany) {
     alert('거래처를 한 곳만 정확히 검색한 상태에서 눌러주세요.');
-    return;
+    return null;
   }
   const company = ctx.targetCompany;
   const fb = ctx.finalBalance || null;
   const balance = fb ? (+fb.잔액 || 0) : 0;
+  let res = null;
+  if (balance > 0) {
+    const { collection, query, getDocs, where, orderBy, limit } = window.fbFuncs;
+    const lines = await fsCached('balsales:' + company, async () => {
+      const snap = await getDocs(query(collection(window.fbdb, '전표_세부'),
+        where('회사', '==', company), where('계정', '==', '매출'), orderBy('날짜', 'desc'), limit(2000)));
+      return snap.docs.map(d => d.data());
+    }, 10 * 60 * 1000);
+    res = pickBalanceInvoices(lines, balance);
+  }
+  // 화면에 조회된 기간별 내역은 현재 정렬 그대로 전부(화면은 500행만 그림) 담는다
+  const period = {
+    items: sortBy(txnItems, txnSort, TXN_SORT_TYPES), balanceMap: ctx.balanceMap, showBalance: ctx.showBalance,
+    from: ctx.from, to: ctx.to,
+    acct: document.getElementById('txn-acct').value, product: document.getElementById('txn-product').value.trim()
+  };
+  if (!res && !period.items.length) { alert('출력할 내역이 없습니다.'); return null; }
+  return { company, html: balanceStatementHtml(company, fb, res, period) };
+}
+
+async function exportBalancePdf() {
+  if (!txnCtx || !txnCtx.targetCompany) { alert('거래처를 한 곳만 정확히 검색한 상태에서 눌러주세요.'); return; }
   // 팝업 차단을 피하려고 클릭 직후 동기적으로 창을 먼저 연다
   const w = window.open('', '_blank');
   if (!w) { alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용한 뒤 다시 눌러주세요.'); return; }
   w.document.write('<p style="font-family:sans-serif;padding:20px">거래내역 불러오는 중...</p>');
   try {
-    let res = null;
-    if (balance > 0) {
-      const { collection, query, getDocs, where, orderBy, limit } = window.fbFuncs;
-      const lines = await fsCached('balsales:' + company, async () => {
-        const snap = await getDocs(query(collection(window.fbdb, '전표_세부'),
-          where('회사', '==', company), where('계정', '==', '매출'), orderBy('날짜', 'desc'), limit(2000)));
-        return snap.docs.map(d => d.data());
-      }, 10 * 60 * 1000);
-      res = pickBalanceInvoices(lines, balance);
-    }
-    // 화면에 조회된 기간별 내역은 현재 정렬 그대로 전부(화면은 500행만 그림) 담는다
-    const period = {
-      items: sortBy(txnItems, txnSort, TXN_SORT_TYPES), balanceMap: ctx.balanceMap, showBalance: ctx.showBalance,
-      from: ctx.from, to: ctx.to,
-      acct: document.getElementById('txn-acct').value, product: document.getElementById('txn-product').value.trim()
-    };
-    if (!res && !period.items.length) { w.close(); alert('출력할 내역이 없습니다.'); return; }
-    const html = balanceStatementHtml(company, fb, res, period);
-    w.document.open(); w.document.write(html); w.document.close();
+    const st = await buildBalanceStatement();
+    if (!st) { w.close(); return; }
+    w.document.open(); w.document.write(st.html); w.document.close();
     w.focus();
     setTimeout(() => w.print(), 300);
   } catch (e) {
@@ -1475,6 +1484,56 @@ async function exportBalancePdf() {
   }
 }
 window.exportBalancePdf = exportBalancePdf;
+
+// 같은 내역서를 PNG 이미지로 저장 (너무 길면 여러 장으로 나눠 저장)
+async function exportBalanceImage() {
+  if (typeof html2canvas === 'undefined') { alert('이미지 모듈을 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.'); return; }
+  const btn = document.getElementById('txn-balimg-btn');
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = '이미지 만드는 중...';
+  let frame = null;
+  try {
+    const st = await buildBalanceStatement();
+    if (!st) return;
+    // 화면 밖의 iframe에 A4 폭(794px)으로 그려 캡처한다 (앱 스타일과 섞이지 않게)
+    frame = document.createElement('iframe');
+    frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;height:1000px;border:0;visibility:hidden';
+    document.body.appendChild(frame);
+    await new Promise(res => { frame.onload = res; frame.srcdoc = st.html; });
+    const doc = frame.contentDocument;
+    const pad = doc.createElement('style');
+    pad.textContent = 'html,body{background:#fff}body{padding:24px;width:746px}';
+    doc.head.appendChild(pad);
+    const cssH = Math.ceil(doc.body.scrollHeight);
+    if (cssH > 30000) { alert('내역이 너무 길어 이미지로 저장할 수 없습니다. 기간을 줄이거나 PDF를 이용해주세요.'); return; }
+    const scale = cssH > 8000 ? 1 : 2;
+    const canvas = await html2canvas(doc.body, { scale, backgroundColor: '#fff', width: 794, windowWidth: 794, logging: false });
+
+    // 한 장이 6000px(css)을 넘으면 여러 장으로 자른다
+    const sliceH = 6000 * scale;
+    const n = canvas.height > sliceH * 1.3 ? Math.ceil(canvas.height / sliceH) : 1;
+    const base = ('거래내역서_' + st.company + '_' + todayStr()).replace(/[\\/:*?"<>|]/g, '_');
+    for (let i = 0; i < n; i++) {
+      const y = i * sliceH, h = n === 1 ? canvas.height : Math.min(sliceH, canvas.height - y);
+      const part = document.createElement('canvas');
+      part.width = canvas.width; part.height = h;
+      part.getContext('2d').drawImage(canvas, 0, y, canvas.width, h, 0, 0, canvas.width, h);
+      const blob = await new Promise(res => part.toBlob(res, 'image/png'));
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = base + (n > 1 ? `_${i + 1}of${n}` : '') + '.png';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+      if (n > 1) await new Promise(res => setTimeout(res, 300));
+    }
+  } catch (e) {
+    alert('이미지를 만들지 못했습니다: ' + e.message);
+  } finally {
+    if (frame) frame.remove();
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+window.exportBalanceImage = exportBalanceImage;
 
 function setTxnSort(key) {
   txnSort = toggleSort(txnSort, key, TXN_SORT_TYPES[key]);
