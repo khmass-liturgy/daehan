@@ -3596,15 +3596,21 @@ async function wdLookupOne(품명) {
   const clean = wdStripPackaging(품명);
   const terms = clean === 품명 ? [품명] : [clean, 품명];
   const collected = new Map();
-  for (const term of terms) {
-    if (!term) continue;
+  const collect = async term => {
+    if (!term) return;
     try {
       const params = new URLSearchParams({ page: '1', searchDivision: 'detail', itemName: term });
       const res = await fetch(QIA_BASE + '/searchMedicine?' + params.toString());
-      if (!res.ok) continue;
+      if (!res.ok) return;
       const { rows } = parseQiaHtml(await res.text());
-      rows.forEach(r => { const k = r.링크 || r.제품명; if (!collected.has(k)) collected.set(k, r); });
+      // 수출 전용 품목은 국내 유통품이 아니라 매칭 후보에서 뺀다 (pb 방식)
+      rows.filter(r => !qiaIsExportOnly(r)).forEach(r => { const k = r.링크 || r.제품명; if (!collected.has(k)) collected.set(k, r); });
     } catch(e) { /* 후보 하나 실패해도 계속 진행 */ }
+  };
+  for (const term of terms) await collect(term);
+  // 정확 검색으로 후보가 없으면 오타·표기차를 감안해 짧게 줄인 검색어로 다시 찾는다 (pb의 유사검색)
+  if (!collected.size) {
+    for (const cand of qiaFuzzyCandidates(clean).slice(0, 4)) { await collect(cand); if (collected.size >= 10) break; }
   }
 
   const scored = [...collected.values()]
@@ -3619,12 +3625,10 @@ async function wdLookupOne(품명) {
     result = { status: 'nowd', qia제품명: best.제품명, 링크: best.링크, 업체명: best.업체명, 품목구분: best.품목구분, 유사도: best._sim };
   } else {
     try {
-      const detailRes = await fetch(best.링크);
-      const html = await detailRes.text();
-      const period = wdExtractPeriod(html);
-      result = period
-        ? { status: 'ok', qia제품명: best.제품명, 링크: best.링크, 업체명: best.업체명, 품목구분: best.품목구분, 유사도: best._sim, 휴약기간: period }
-        : { status: 'noinfo', qia제품명: best.제품명, 링크: best.링크, 업체명: best.업체명, 품목구분: best.품목구분, 유사도: best._sim };
+      // 상세 정보(휴약기간·포장단위·제형)는 동물약품 검색과 같은 캐시를 쓴다
+      const info = await qiaDetailInfo(best.링크);
+      const base = { qia제품명: best.제품명, 링크: best.링크, 업체명: best.업체명, 품목구분: best.품목구분, 유사도: best._sim, 포장: info.pack, 제형: info.form };
+      result = info.wd ? { status: 'ok', ...base, 휴약기간: info.wd } : { status: 'noinfo', ...base };
     } catch(e) {
       result = { status: 'error', qia제품명: best.제품명, 링크: best.링크, 유사도: best._sim };
     }
@@ -3699,6 +3703,7 @@ async function searchWd() {
 }
 window.searchWd = searchWd;
 
+const WD_TO_QIA_SPECIES = { '양계':'chicken', '양돈':'pig', '축우':'cattle' };  // 우리 축종 → QIA 대상동물 key
 const WD_SPECIES_COLOR = { '양계':'#f0a050', '양돈':'#e05555', '축우':'#7F77DD', '공통':'#36c4a0', '미지정':'var(--text3)' };
 const WD_STATUS_LABEL = {
   pending: { txt: '조회 대기', cls: 'var(--text3)' },
@@ -3727,7 +3732,7 @@ function renderWdTable(totalFiltered) {
     if (r.status === 'ok' || r.status === 'nowd' || r.status === 'noinfo' || r.status === 'error') {
       const sim = r.유사도 != null ? ` <span style="color:var(--text3)">(유사도 ${Math.round(r.유사도*100)}%)</span>` : '';
       qiaCell = r.링크
-        ? `<a href="${esc(safeUrl(r.링크))}" target="_blank" rel="noopener" style="color:var(--blue);font-weight:600">${esc(r.qia제품명||'')} ↗</a>${sim}`
+        ? `<a href="${esc(safeUrl(r.링크))}" target="_blank" rel="noopener" style="color:var(--blue);font-weight:600">${esc(r.qia제품명||'')} ↗</a>${sim}${r.제형 ? ` <span class="tag" style="background:var(--bg3);color:var(--text3)">${esc(r.제형)}</span>` : ''}${r.포장 ? `<div style="font-size:10.5px;color:var(--text3)">${esc(r.포장.length > 40 ? r.포장.slice(0, 40) + '…' : r.포장)}</div>` : ''}`
         : (r.qia제품명 || '-');
     } else if (r.status === 'loading') {
       qiaCell = '<span class="spinner" style="width:12px;height:12px"></span>';
@@ -3737,7 +3742,9 @@ function renderWdTable(totalFiltered) {
 
     let wdCell;
     if (r.status === 'ok') {
-      wdCell = `<strong>${esc(r.휴약기간)}</strong>`;
+      const key = WD_TO_QIA_SPECIES[r.축종];
+      const pw = key ? qiaWdForSpecies(r.휴약기간, key) : { text: r.휴약기간 };
+      wdCell = `<strong title="QIA 원문: ${esc(r.휴약기간)}">${esc(pw.text || r.휴약기간)}</strong>${key && pw.text && pw.text !== r.휴약기간 ? ` <span style="font-size:10px;color:var(--text3)">(${esc(r.축종)} 기준)</span>` : ''}`;
     } else if (r.status === 'loading' || r.status === 'pending') {
       wdCell = `<span style="color:${st.cls}">${st.txt}</span>`;
     } else {
