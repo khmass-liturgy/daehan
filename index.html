@@ -250,6 +250,7 @@ th.bigo{min-width:110px}
         <button class="toggle-btn" onclick="setTxnRange('year')">올해</button>
         <button class="toggle-btn" onclick="setTxnRange('clear')">기간 해제</button>
         <button class="search-btn" id="txn-excel-btn" onclick="exportTxnExcel()" style="background:var(--green)">엑셀 내보내기</button>
+        <button class="search-btn" id="txn-balpdf-btn" onclick="exportBalancePdf()" style="background:var(--amber);color:#1a1a1a" title="거래처 한 곳을 검색한 상태에서, 현재 잔액에 해당하는 최근 매출 내역을 PDF로 저장">잔액 내역 PDF</button>
       </div>
       <div id="txn-result"></div>
     </div>
@@ -1312,6 +1313,114 @@ function exportTxnExcel() {
   XLSX.writeFile(wb, name);
 }
 window.exportTxnExcel = exportTxnExcel;
+
+// ── 잔액 내역 PDF ─────────────────────────────────
+// 현재 잔액(미수금)을 이루는 최근 매출 전표만 골라낸다. 오래된 매출부터 수금된 것으로 보고(선입선출),
+// 가장 최근 전표부터 거꾸로 잔액이 채워질 때까지 담는다. 마지막 전표는 잔액에 못 미치는 일부만 미수일 수 있다.
+function pickBalanceInvoices(lines, balance) {
+  const byNo = new Map();
+  for (const r of lines) {
+    const key = r.전표번호 || ((r.날짜 || '') + '|' + (r.회사 || ''));
+    const inv = byNo.get(key) || { 전표번호: r.전표번호 || '', 날짜: r.날짜 || '', lines: [], 합계: 0 };
+    inv.lines.push(r);
+    inv.합계 += (+r.공급가액 || 0) + (+r.세액 || 0);
+    byNo.set(key, inv);
+  }
+  const invoices = [...byNo.values()].sort((a, b) =>
+    b.날짜.localeCompare(a.날짜) || b.전표번호.localeCompare(a.전표번호));
+  const picked = [];
+  let covered = 0;
+  for (const inv of invoices) {
+    const remain = balance - covered;
+    if (remain <= 0) break;
+    const 미수분 = Math.min(inv.합계, remain);
+    picked.push({ ...inv, 미수분, partial: 미수분 < inv.합계 });
+    covered += 미수분;
+  }
+  return { invoices: picked, covered, shortfall: Math.max(0, balance - covered) };
+}
+
+function balanceStatementHtml(company, fb, res) {
+  const balance = +fb.잔액 || 0;
+  const asOf = fb.잔액기준일 ? `${esc(fb.잔액기준일)} ${esc(fb.잔액기준계정 || '')} 명세표 기준` : '';
+  const body = res.invoices.map(inv => {
+    const rows = inv.lines.map(r => `<tr>
+        <td>${esc(inv.날짜)}</td>
+        <td>${esc(r.품명 || '-')}</td>
+        <td class="n">${+r.수량 > 0 ? fmtNum(r.수량) : '-'}</td>
+        <td class="n">${+r.단가 > 0 ? fmtNum(r.단가) : '-'}</td>
+        <td class="n">${fmtNum((+r.공급가액 || 0) + (+r.세액 || 0))}</td>
+      </tr>`).join('');
+    const sub = inv.partial
+      ? `전표 합계 ${fmtNum(inv.합계)}원 중 <b>미수분 ${fmtNum(inv.미수분)}원</b>`
+      : `전표 합계 ${fmtNum(inv.합계)}원`;
+    return `<tbody>${rows}<tr class="sub"><td colspan="5">${inv.전표번호 ? '전표 ' + esc(inv.전표번호) + ' · ' : ''}${sub}</td></tr></tbody>`;
+  }).join('');
+  const warn = res.shortfall > 0
+    ? `<p class="warn">※ 조회된 매출 내역만으로는 잔액을 모두 채우지 못했습니다 (부족 ${fmtNum(res.shortfall)}원 — 이월잔액 또는 조회 범위 밖의 오래된 거래일 수 있습니다).</p>` : '';
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<title>잔액내역_${esc(company)}_${todayStr()}</title>
+<style>
+  @page { size: A4; margin: 14mm 12mm; }
+  body { font-family: 'Malgun Gothic','Apple SD Gothic Neo',sans-serif; color:#111; font-size:12px; margin:0; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .meta { color:#555; font-size:11px; margin-bottom:12px; }
+  .box { border:1px solid #333; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+  .box .amt { font-size:22px; font-weight:700; }
+  table { width:100%; border-collapse:collapse; }
+  thead th { background:#eee; border:1px solid #999; padding:5px 6px; font-size:11px; }
+  td { border:1px solid #ccc; padding:4px 6px; }
+  .n { text-align:right; white-space:nowrap; }
+  tr.sub td { background:#f6f6f6; font-size:11px; text-align:right; border-bottom:1px solid #999; }
+  tbody { break-inside:auto; }
+  tr { break-inside:avoid; }
+  .tot { margin-top:12px; text-align:right; font-size:13px; }
+  .warn { color:#b00; font-size:11px; margin-top:10px; }
+  .note { color:#666; font-size:10px; margin-top:14px; }
+</style></head><body>
+  <h1>거래처 잔액 내역서</h1>
+  <div class="meta">출력일 ${todayStr()}${asOf ? ' · 잔액 ' + asOf : ''}</div>
+  <div class="box"><div><b>${esc(company)}</b><div class="meta" style="margin:2px 0 0">현재 미수금(잔액)</div></div><div class="amt">${fmtNum(balance)}원</div></div>
+  <table>
+    <thead><tr><th>날짜</th><th>품명</th><th>수량</th><th>단가</th><th>금액(세액포함)</th></tr></thead>
+    ${body}
+  </table>
+  <div class="tot">잔액 해당 내역 합계 <b>${fmtNum(res.covered)}원</b> (${res.invoices.length}건 전표)</div>
+  ${warn}
+  <div class="note">최근 매출부터 거슬러 올라가 현재 잔액만큼을 채운 내역입니다 (오래된 매출부터 수금된 것으로 가정).</div>
+</body></html>`;
+}
+
+async function exportBalancePdf() {
+  const ctx = txnCtx;
+  if (!ctx || !ctx.targetCompany || !ctx.finalBalance) {
+    alert('거래처를 한 곳만 정확히 검색해 잔액이 표시된 상태에서 눌러주세요.');
+    return;
+  }
+  const company = ctx.targetCompany;
+  const balance = +ctx.finalBalance.잔액 || 0;
+  if (balance <= 0) { alert(`${company}은(는) 현재 미수금(잔액)이 없습니다.`); return; }
+  // 팝업 차단을 피하려고 클릭 직후 동기적으로 창을 먼저 연다
+  const w = window.open('', '_blank');
+  if (!w) { alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용한 뒤 다시 눌러주세요.'); return; }
+  w.document.write('<p style="font-family:sans-serif;padding:20px">잔액 내역 불러오는 중...</p>');
+  try {
+    const { collection, query, getDocs, where, orderBy, limit } = window.fbFuncs;
+    const lines = await fsCached('balsales:' + company, async () => {
+      const snap = await getDocs(query(collection(window.fbdb, '전표_세부'),
+        where('회사', '==', company), where('계정', '==', '매출'), orderBy('날짜', 'desc'), limit(2000)));
+      return snap.docs.map(d => d.data());
+    }, 10 * 60 * 1000);
+    const html = balanceStatementHtml(company, ctx.finalBalance, pickBalanceInvoices(lines, balance));
+    w.document.open(); w.document.write(html); w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 300);
+  } catch (e) {
+    w.close();
+    alert('잔액 내역을 불러오지 못했습니다: ' + e.message);
+  }
+}
+window.exportBalancePdf = exportBalancePdf;
 
 function setTxnSort(key) {
   txnSort = toggleSort(txnSort, key, TXN_SORT_TYPES[key]);
