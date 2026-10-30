@@ -103,6 +103,55 @@ tr:hover td{background:var(--bg3)}
 
 .pos{color:var(--amber)}.neg{color:var(--green)}.zero{color:var(--text3)}
 @media(max-width:600px){.hide-mobile{display:none}}
+/* ── 거래내역 탭 (Figma 시안 반영) ── */
+.txn-panel{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px}
+.txn-panel .search-row:last-child{margin-bottom:0}
+.txn-panel .search-row:first-child{margin-bottom:12px}
+.txn-panel .toggle-btn{padding:8px 12px}
+.txn-panel .toggle-btn:hover{border-color:var(--blue);color:var(--blue)}
+.txn-panel .search-btn{padding:9px 16px;font-size:12px}
+.txn-panel .search-row:first-child .search-btn{padding:10px 28px;font-size:13px}
+.txn-bal{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px 24px;margin-bottom:16px}
+.txn-bal .lbl{font-size:11px;color:var(--text3);font-weight:500}
+.txn-bal .co{font-size:18px;font-weight:700;margin:4px 0}
+.txn-bal .ref{font-size:11px;color:var(--text2)}
+.txn-bal .amt{font-size:36px;font-weight:700;line-height:1.2;text-align:right}
+.txn-bal .amt span{font-size:18px}
+.txn-bal .sub{font-size:11px;color:var(--text3);text-align:right}
+.txn-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.txn-card table{min-width:640px}
+.txn-card th{background:var(--bg3);padding:10px 12px;border-bottom:none}
+.txn-card th:first-child,.txn-card td:first-child{padding-left:20px}
+.txn-card td{padding:11px 12px}
+.txn-card tbody tr:nth-child(even) td{background:#151924}
+.txn-card tbody tr:hover td{background:var(--bg3)}
+.txn-foot{display:flex;justify-content:space-between;gap:8px;padding:10px 20px;background:var(--bg3);font-size:11px;color:var(--text2)}
+.txn-foot span:last-child{color:var(--text3)}
+.txn-list{display:none}
+@media(max-width:600px){
+  .txn-panel{padding:14px;background:none;border:none;padding:0}
+  .txn-panel .search-row{margin-bottom:12px}
+  .txn-panel .search-row:first-child .search-input{flex:1 1 100%}
+  .txn-panel select.filter{flex:1}
+  .txn-period{flex:1 1 100%!important}
+  .txn-period .search-input{flex:1 1 0!important;min-width:0}
+  .txn-chips{flex-wrap:nowrap!important;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .txn-panel .txn-xbtn{flex:1}
+  .txn-bal{padding:16px;flex-direction:column;align-items:flex-start}
+  .txn-bal .amt,.txn-bal .sub{text-align:left}
+  .txn-bal .amt{font-size:30px}
+  .txn-card table{display:none}
+  .txn-list{display:block}
+  .txn-lh{display:flex;gap:10px;padding:9px 14px;background:var(--bg3);font-size:11px;color:var(--text3);font-weight:500}
+  .txn-lh span{cursor:pointer;user-select:none}
+  .txn-lh .grow{flex:1}
+  .txn-li{display:flex;gap:10px;padding:11px 14px;border-top:1px solid var(--bg3)}
+  .txn-li:nth-child(odd){background:#151924}
+  .txn-li .c1{width:78px;flex:none;display:flex;flex-direction:column;gap:6px;align-items:flex-start;font-size:12px;color:var(--text2)}
+  .txn-li .c2{flex:1;min-width:0;font-size:12px;line-height:1.5}
+  .txn-li .c2 .sub{color:var(--text2);font-size:11px}
+  .txn-li .c3{text-align:right;font-size:12px;line-height:1.5;font-variant-numeric:tabular-nums}
+}
 .qtbl{table-layout:fixed;min-width:0}
 .qtbl th{white-space:normal;vertical-align:bottom}
 .qtbl td{white-space:normal;overflow-wrap:anywhere;word-break:keep-all;vertical-align:top;line-height:1.5}
@@ -229,6 +278,7 @@ th.bigo{min-width:110px}
     </div>
 
     <div id="tab-txn" style="display:none">
+      <div class="txn-panel">
       <div class="search-row">
         <input class="search-input" id="txn-company" placeholder="거래처명..." oninput="clearTxnAutoFilters()" onkeydown="if(event.key==='Enter')searchTxn()">
         <input class="search-input" id="txn-product" placeholder="품명..." onkeydown="if(event.key==='Enter')searchTxn()">
@@ -242,20 +292,23 @@ th.bigo{min-width:110px}
         <button class="search-btn" onclick="searchTxn()">검색</button>
       </div>
       <div class="search-row">
-        <span style="display:flex;gap:8px;align-items:center;flex:0 0 auto">
+        <span class="txn-period" style="display:flex;gap:8px;align-items:center;flex:0 0 auto">
           <span style="font-size:12px;color:var(--text2)">기간</span>
           <input type="date" class="search-input" id="txn-from" style="flex:0 0 auto" onchange="searchTxn()">
           <span style="color:var(--text3)">~</span>
           <input type="date" class="search-input" id="txn-to" style="flex:0 0 auto" onchange="searchTxn()">
         </span>
+        <span class="txn-chips" style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="toggle-btn" onclick="setTxnRange('thismonth')">이번달</button>
         <button class="toggle-btn" onclick="setTxnRange('lastmonth')">지난달</button>
         <button class="toggle-btn" onclick="setTxnRange('3m')">최근 3개월</button>
         <button class="toggle-btn" onclick="setTxnRange('year')">올해</button>
         <button class="toggle-btn" onclick="setTxnRange('clear')">기간 해제</button>
-        <button class="search-btn" id="txn-excel-btn" onclick="exportTxnExcel()" style="background:var(--green)">엑셀 내보내기</button>
-        <button class="search-btn" id="txn-balpdf-btn" onclick="exportBalancePdf()" style="background:var(--amber);color:#1a1a1a" title="거래처 한 곳을 검색한 상태에서, 현재 잔액에 해당하는 매출 내역과 조회된 기간별 거래내역을 함께 PDF로 저장">잔액·기간내역 PDF</button>
-        <button class="search-btn" id="txn-balimg-btn" onclick="exportBalanceImage()" style="background:var(--purple)" title="잔액·기간내역 PDF와 같은 내용을 이미지(PNG)로 저장">이미지 저장</button>
+        </span>
+        <button class="search-btn txn-xbtn" id="txn-excel-btn" onclick="exportTxnExcel()" style="background:var(--green)">엑셀 내보내기</button>
+        <button class="search-btn txn-xbtn" id="txn-balpdf-btn" onclick="exportBalancePdf()" style="background:var(--amber);color:#1a1a1a" title="거래처 한 곳을 검색한 상태에서, 현재 잔액에 해당하는 매출 내역과 조회된 기간별 거래내역을 함께 PDF로 저장">잔액·기간내역 PDF</button>
+        <button class="search-btn txn-xbtn" id="txn-balimg-btn" onclick="exportBalanceImage()" style="background:var(--purple)" title="잔액·기간내역 PDF와 같은 내용을 이미지(PNG)로 저장">이미지 저장</button>
+      </div>
       </div>
       <div id="txn-result"></div>
     </div>
@@ -1813,22 +1866,42 @@ function renderTxnResult() {
     const fb = +finalBalance.잔액 || 0;
     const fbColor = fb > 0 ? 'var(--amber)' : fb < 0 ? 'var(--green)' : 'var(--text3)';
     finalBalanceCard = `
-      <div class="card" style="margin-bottom:14px">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-          <div>
-            <div style="font-size:13px;color:var(--text2);font-weight:600">${esc(targetCompany)} · 최종잔액 (미수금)</div>
-            <div style="font-size:11px;color:var(--text3);margin-top:4px">
-              ${finalBalance.잔액기준일 ? `${esc(finalBalance.잔액기준일)} ${esc(finalBalance.잔액기준계정||'')} 명세표 기준` : '기준 전표 없음'}
-            </div>
-          </div>
-          <div style="font-size:24px;font-weight:700;color:${fbColor}">${fmtNum(fb)}<span style="font-size:13px">원</span></div>
+      <div class="txn-bal">
+        <div>
+          <div class="lbl">최종잔액 (미수금)</div>
+          <div class="co">${esc(targetCompany)}</div>
+          <div class="ref">${finalBalance.잔액기준일 ? `${esc(finalBalance.잔액기준일)} ${esc(finalBalance.잔액기준계정||'')} 명세표 기준` : '기준 전표 없음'}</div>
+        </div>
+        <div>
+          <div class="amt" style="color:${fbColor}">${fmtNum(fb)}<span>원</span></div>
+          <div class="sub">${fb > 0 ? '미수 잔액' : fb < 0 ? '선수 잔액' : ''}</div>
         </div>
       </div>`;
   }
 
+  // 모바일(≤600px): 표 대신 2줄 카드형 목록 (수량·단가 숨김)
+  const sortLbl = (label, key, cls) => {
+    const on = txnSort && txnSort.key === key;
+    return `<span class="${cls||''}" onclick="setTxnSort('${key}')" style="${on?'color:var(--blue)':''}">${label}${on ? (txnSort.dir==='asc'?' ▲':' ▼') : ''}</span>`;
+  };
+  const listRows = items.slice(0, 500).map(r => {
+    const bal = balanceMap[r.전표번호];
+    const amt = +r.공급가액 ? fmtNum(r.공급가액) : '-';
+    const balTxt = showBalance && bal!==undefined ? `<div class="${bal>0?'pos':bal<0?'neg':'zero'}">${fmtNum(bal)}</div>` : '';
+    const sub = bigoCell(r);
+    return `<div class="txn-li">
+      <div class="c1"><span>${esc((r.날짜||'').slice(5))}</span><span class="tag tag-${esc(r.계정)}">${esc(r.계정||'')}</span></div>
+      <div class="c2"><div><strong>${esc(r.회사||'')}</strong></div><div>${esc(r.품명||'-')}</div>${sub?`<div class="sub">${sub}</div>`:''}</div>
+      <div class="c3"><div>${amt}</div>${balTxt}</div>
+    </div>`;
+  }).join('');
+  const txnList = `<div class="txn-list">
+      <div class="txn-lh">${sortLbl('날짜','날짜','')}${sortLbl('거래처','회사','grow')}${sortLbl('금액','공급가액','')}</div>
+      ${listRows}</div>`;
+
   document.getElementById('txn-result').innerHTML = `
     ${finalBalanceCard}
-    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">${infoMsg} · 헤더 클릭시 정렬</div>
+    <div class="txn-card">
     <div class="tbl-wrap"><table>
       <thead><tr>
         ${thSort('날짜','날짜',txnSort,'setTxnSort')}
@@ -1842,7 +1915,10 @@ function renderTxnResult() {
         ${thSort('비고','비고',txnSort,'setTxnSort','bigo')}
       </tr></thead>
       <tbody>${rows}</tbody>
-    </table></div>`;
+    </table></div>
+    ${txnList}
+    <div class="txn-foot"><span>${infoMsg}</span><span>헤더 클릭시 정렬</span></div>
+    </div>`;
 }
 
 // 거래내역 탭 첫 진입시 자동 표시: 당일 매출 기준, 당일 데이터가 아직 없으면 최근 매출일로 대체
