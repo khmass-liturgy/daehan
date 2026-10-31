@@ -239,6 +239,10 @@ th.bigo{min-width:110px}
 
     <div id="tab-salesrank" style="display:none">
       <div class="search-row">
+        <button class="toggle-btn on" id="sr-view-cust" onclick="setSrView('cust')">거래처별</button>
+        <button class="toggle-btn" id="sr-view-mfg" onclick="setSrView('mfg')">제조사별</button>
+      </div>
+      <div class="search-row" id="sr-cat-row">
         <button class="toggle-btn on" id="sr-cat-all" onclick="setSalesRankCategory('all')">전체</button>
         <button class="toggle-btn" id="sr-cat-양계" onclick="setSalesRankCategory('양계')">🐔 양계</button>
         <button class="toggle-btn" id="sr-cat-양돈" onclick="setSalesRankCategory('양돈')">🐷 양돈</button>
@@ -252,6 +256,7 @@ th.bigo{min-width:110px}
           <option value="20">상위 20곳</option>
           <option value="50" selected>상위 50곳</option>
           <option value="100">상위 100곳</option>
+          <option value="99999">전체</option>
         </select>
       </div>
       <div id="salesrank-result"></div>
@@ -2340,7 +2345,110 @@ function setSrSort(key) {
 }
 window.setSrSort = setSrSort;
 
+// 하위 메뉴: 거래처별 / 제조사별
+let srView = 'cust';
+function setSrView(v) {
+  srView = v;
+  ['cust','mfg'].forEach(k => document.getElementById('sr-view-'+k).classList.toggle('on', k === v));
+  document.getElementById('sr-cat-row').style.display = v === 'cust' ? '' : 'none';
+  searchSalesRank();
+}
+window.setSrView = setSrView;
+
+// ── 제조사별 매출 순위 ──
+// 거래처품목(품명별 매출 집계)을 제품의 대분류(=제조사)별로 합산한다
+let mfgRaw = [];
+let mfgSort = { key: '매출금액', dir: 'desc' };
+const MFG_SORT_TYPES = { 제조사:'text', 매출금액:'num', 비중:'num', 품목수:'num', 판매수량:'num', 거래처수:'num' };
+function setMfgSort(key) {
+  mfgSort = toggleSort(mfgSort, key, MFG_SORT_TYPES[key]);
+  renderMfgRank();
+}
+window.setMfgSort = setMfgSort;
+
+async function searchMfgRank() {
+  loading('salesrank-result');
+  try {
+    const [companies, prodSnap] = await Promise.all([loadCompanyItems(), fsAll('제품', 2000)]);
+    const mfgOf = new Map();
+    prodSnap.docs.forEach(d => { const r = d.data(); if (r.품명) mfgOf.set(r.품명, r.대분류 || ''); });
+
+    const map = new Map();
+    for (const c of companies) {
+      for (const it of c.품목 || []) {
+        const 제조사 = mfgOf.get(it.품명) || '(제조사 미상)';
+        const cur = map.get(제조사) || { 제조사, 매출금액: 0, 판매수량: 0, 품목맵: new Map(), 거래처: new Set() };
+        const 금액 = +it.금액 || 0;
+        cur.매출금액 += 금액;
+        cur.판매수량 += (+it.수량 || 0);
+        cur.품목맵.set(it.품명, (cur.품목맵.get(it.품명) || 0) + 금액);
+        if (금액 > 0) cur.거래처.add(c.회사);
+        map.set(제조사, cur);
+      }
+    }
+    const total = [...map.values()].reduce((s, r) => s + r.매출금액, 0);
+    mfgRaw = [...map.values()].filter(r => r.매출금액 > 0).map(r => {
+      const top = [...r.품목맵.entries()].sort((a, b) => b[1] - a[1])[0] || ['', 0];
+      return {
+        제조사: r.제조사, 매출금액: r.매출금액, 판매수량: r.판매수량,
+        비중: total ? r.매출금액 / total * 100 : 0,
+        품목수: r.품목맵.size, 거래처수: r.거래처.size,
+        대표품목: top[0], 대표금액: top[1],
+      };
+    }).sort((a, b) => b.매출금액 - a.매출금액).map((r, i) => ({ ...r, _순위: i + 1 }));
+    mfgTotal = total;
+    renderMfgRank();
+  } catch (e) {
+    document.getElementById('salesrank-result').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
+    console.error(e);
+  }
+}
+let mfgTotal = 0;
+
+function renderMfgRank() {
+  if (!mfgRaw.length) { empty('salesrank-result'); return; }
+  const topN = +document.getElementById('sr-topn').value || 50;
+  const items = sortBy(mfgRaw.slice(0, topN), mfgSort, MFG_SORT_TYPES);
+  const maxAmt = mfgRaw[0].매출금액 || 1;
+  const rows = items.map(r => `<tr>
+      <td class="num" style="color:var(--text3)">${r._순위}</td>
+      <td><strong style="color:var(--blue)">${esc(r.제조사)}</strong></td>
+      <td class="num"><strong>${fmt억(r.매출금액)}</strong></td>
+      <td class="num">
+        <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end">
+          <div style="width:60px;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden" class="hide-mobile"><div style="width:${(r.매출금액/maxAmt*100).toFixed(1)}%;height:100%;background:var(--blue)"></div></div>
+          <span>${r.비중.toFixed(1)}%</span>
+        </div>
+      </td>
+      <td class="num hide-mobile">${fmtNum(r.품목수)}</td>
+      <td class="num hide-mobile">${fmtNum(r.판매수량)}</td>
+      <td class="num hide-mobile">${fmtNum(r.거래처수)}</td>
+      <td class="hide-mobile" style="font-size:11px;color:var(--text2)">${esc(r.대표품목)} <span style="color:var(--text3)">(${fmt억(r.대표금액)})</span></td>
+    </tr>`).join('');
+  document.getElementById('salesrank-result').innerHTML = `
+    <div style="margin-bottom:12px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;font-size:12px">
+      제조사 ${mfgRaw.length}곳 · 총 매출 <strong>${fmt억(mfgTotal)}</strong>
+    </div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
+      제조사별 매출 상위 ${items.length}곳 · 거래처별 품목 집계 기준 · 헤더 클릭시 정렬
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        <th>#</th>
+        ${thSort('제조사','제조사',mfgSort,'setMfgSort')}
+        ${thSort('매출금액','매출금액',mfgSort,'setMfgSort','num')}
+        ${thSort('비중','비중',mfgSort,'setMfgSort','num')}
+        ${thSort('품목수','품목수',mfgSort,'setMfgSort','num hide-mobile')}
+        ${thSort('판매수량','판매수량',mfgSort,'setMfgSort','num hide-mobile')}
+        ${thSort('거래처수','거래처수',mfgSort,'setMfgSort','num hide-mobile')}
+        <th class="hide-mobile">대표 품목</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+
 async function searchSalesRank() {
+  if (srView === 'mfg') return searchMfgRank();
   loading('salesrank-result');
   const topN = +document.getElementById('sr-topn').value || 50;
 
