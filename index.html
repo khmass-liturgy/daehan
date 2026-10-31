@@ -3065,7 +3065,14 @@ function dismissNewNotice() {
 window.dismissNewNotice = dismissNewNotice;
 function openNewMenu(v) { showTab('panal'); setPaView(v || 'cm'); }
 window.openNewMenu = openNewMenu;
+// NEW 배지·안내 줄은 이 날짜(포함)까지만 보인다 — 2026-10-31 공개 후 15일간.
+// 다음 새 기능을 알릴 때는 날짜와 NEW_NOTICE_KEY를 함께 바꾼다.
+const NEW_UNTIL = '2026-11-14';
 (function () {
+  if (todayStr() > NEW_UNTIL) {
+    document.querySelectorAll('.new-badge').forEach(b => b.remove());
+    return;   // 기간이 지나면 안내 줄도 켜지 않는다
+  }
   let seen = false;
   try { seen = localStorage.getItem(NEW_NOTICE_KEY) === '1'; } catch (e) {}
   const el = document.getElementById('new-menu-notice');
