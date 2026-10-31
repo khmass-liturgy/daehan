@@ -103,6 +103,13 @@ tr:hover td{background:var(--bg3)}
 
 .pos{color:var(--amber)}.neg{color:var(--green)}.zero{color:var(--text3)}
 @media(max-width:600px){.hide-mobile{display:none}}
+/* ── 새 메뉴 안내 줄 ── */
+.new-notice{display:flex;align-items:flex-start;gap:10px;padding:8px 16px;background:#16233d;border-bottom:1px solid var(--border2);font-size:12px;line-height:1.55;color:var(--text)}
+.new-badge{display:inline-block;background:var(--blue);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;letter-spacing:.3px;flex:none;line-height:1.5}
+.new-text{flex:1;cursor:pointer}
+.new-text b{color:var(--blue)}
+.new-close{background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:0 2px;flex:none}
+.new-close:hover{color:var(--text)}
 /* ── 거래내역 탭 (Figma 시안 반영) ── */
 .txn-panel{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:16px}
 .txn-panel .search-row:last-child{margin-bottom:0}
@@ -178,6 +185,12 @@ th.bigo{min-width:110px}
     <div style="display:flex;align-items:center;gap:8px"><span id="fs-reads" title="이번 접속에서 읽은 Firestore 문서 수 (무료 한도: 하루 5만건)" style="font-size:10px;color:var(--text3)"></span><div class="badge" id="data-date">-</div></div>
     <button class="toggle-btn" id="logout-btn">로그아웃</button>
   </header>
+
+  <div class="new-notice" id="new-menu-notice" style="display:none">
+    <span class="new-badge">NEW</span>
+    <span class="new-text" onclick="openNewMenu()" title="눌러서 바로 가기"><b>제품분석 ▸ 거래처×제조사 순위</b> — 거래처별로 제조사 단위 매출 순위를 보고, 각 조합에서 매출이 가장 큰 <b>대표품목</b>을 확인할 수 있습니다. (최근 2년 기준 · 기존 화면은 '품목별 순위')</span>
+    <button class="new-close" onclick="dismissNewNotice()" title="닫기">✕</button>
+  </div>
 
   <nav>
     <div class="nav-tab active" onclick="showTab('stock')">제품정보</div>
@@ -264,6 +277,11 @@ th.bigo{min-width:110px}
 
     <div id="tab-panal" style="display:none">
       <div class="search-row">
+        <button class="toggle-btn on" id="pa-view-btn-item" onclick="setPaView('item')">품목별 순위</button>
+        <button class="toggle-btn" id="pa-view-btn-cm" onclick="setPaView('cm')">거래처×제조사 순위 <span class="new-badge">NEW</span></button>
+      </div>
+      <div id="pa-view-item">
+      <div class="search-row">
         <button class="toggle-btn on" id="pa-sp-all" onclick="setPaSpecies('all')">축종 전체</button>
         <button class="toggle-btn" id="pa-sp-양계" onclick="setPaSpecies('양계')">🐔 양계</button>
         <button class="toggle-btn" id="pa-sp-양돈" onclick="setPaSpecies('양돈')">🐷 양돈</button>
@@ -280,6 +298,20 @@ th.bigo{min-width:110px}
         </select>
       </div>
       <div id="panal-result"></div>
+      </div>
+      <div id="pa-view-cm" style="display:none">
+        <div class="search-row">
+          <input class="search-input" id="cm-q" placeholder="거래처명 검색..." oninput="renderCompanyMfg()">
+          <select class="filter" id="cm-mfg" onchange="renderCompanyMfg()"><option value="">제조사 전체</option></select>
+          <select class="filter" id="cm-topn" onchange="renderCompanyMfg()">
+            <option value="20">상위 20개</option>
+            <option value="50" selected>상위 50개</option>
+            <option value="100">상위 100개</option>
+            <option value="99999">전체</option>
+          </select>
+        </div>
+        <div id="cm-result"></div>
+      </div>
     </div>
 
     <div id="tab-txn" style="display:none">
@@ -2754,6 +2786,132 @@ function renderProdAnalysis() {
     </table></div>`;
 }
 window.renderProdAnalysis = renderProdAnalysis;
+
+// ── 제품분석 하위 메뉴: 거래처×제조사 순위 (+ 대표품목) ─────────
+// 거래처품목 집계(최근 2년)를 제품의 제조사(대분류)별로 묶어, 거래처×제조사 조합의
+// 매출 순위를 보여주고 각 조합에서 매출이 가장 큰 품목을 '대표품목'으로 표시한다.
+let paView = 'item';
+let cmRaw = [];
+let cmLoaded = false;
+let cmItems = [];
+let cmSort = { key: '매출금액', dir: 'desc' };
+const CM_SORT_TYPES = { 회사:'text', 제조사:'text', 매출금액:'num', 판매수량:'num', 대표품목:'text' };
+
+function setPaView(v) {
+  paView = v;
+  document.getElementById('pa-view-item').style.display = v === 'item' ? '' : 'none';
+  document.getElementById('pa-view-cm').style.display = v === 'cm' ? '' : 'none';
+  ['item','cm'].forEach(k => document.getElementById('pa-view-btn-'+k).classList.toggle('on', k === v));
+  if (v === 'cm' && !cmLoaded) searchCompanyMfg();
+}
+window.setPaView = setPaView;
+
+function setCmSort(key) {
+  cmSort = toggleSort(cmSort, key, CM_SORT_TYPES[key]);
+  renderCompanyMfg();
+}
+window.setCmSort = setCmSort;
+
+async function searchCompanyMfg() {
+  loading('cm-result');
+  try {
+    const [companies, prodSnap] = await Promise.all([loadCompanyItems(), fsAll('제품', 2000)]);
+    const mfgOf = new Map();
+    prodSnap.docs.forEach(d => { const r = d.data(); if (r.품명) mfgOf.set(r.품명, r.대분류 || ''); });
+
+    const rows = [];
+    for (const c of companies) {
+      const byMfg = new Map();
+      for (const it of c.품목 || []) {
+        const 제조사 = mfgOf.get(it.품명) || '미지정';
+        const g = byMfg.get(제조사) || { 회사: c.회사, 제조사, 매출금액: 0, 판매수량: 0, 품목수: 0, 대표품목: '', 대표금액: 0, 대표수량: 0 };
+        const 금액 = +it.금액 || 0, 수량 = +it.수량 || 0;
+        g.매출금액 += 금액; g.판매수량 += 수량; g.품목수 += 1;
+        if (금액 > g.대표금액 || (금액 === g.대표금액 && 수량 > g.대표수량)) { g.대표품목 = it.품명; g.대표금액 = 금액; g.대표수량 = 수량; }
+        byMfg.set(제조사, g);
+      }
+      for (const g of byMfg.values()) if (g.매출금액 > 0) rows.push(g);
+    }
+    rows.sort((a, b) => b.매출금액 - a.매출금액);
+    cmRaw = rows;
+    cmLoaded = true;
+
+    const sel = document.getElementById('cm-mfg');
+    const cur = sel.value;
+    const mfgTotals = new Map();
+    rows.forEach(r => mfgTotals.set(r.제조사, (mfgTotals.get(r.제조사) || 0) + r.매출금액));
+    sel.innerHTML = '<option value="">제조사 전체</option>' +
+      [...mfgTotals.entries()].sort((a, b) => b[1] - a[1]).map(([m]) => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+    sel.value = cur;
+    renderCompanyMfg();
+  } catch (e) {
+    document.getElementById('cm-result').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
+    console.error(e);
+  }
+}
+window.searchCompanyMfg = searchCompanyMfg;
+
+function renderCompanyMfg() {
+  if (!cmRaw.length) { empty('cm-result'); return; }
+  const q = document.getElementById('cm-q').value.trim().toLowerCase();
+  const mfg = document.getElementById('cm-mfg').value;
+  const topN = +document.getElementById('cm-topn').value || 50;
+
+  const filtered = cmRaw.filter(r => (!mfg || r.제조사 === mfg) && (!q || (r.회사 || '').toLowerCase().includes(q)));
+  if (!filtered.length) { empty('cm-result'); return; }
+  // 순위는 매출금액 기준으로 고정(다른 열로 정렬해도 순위 번호는 바뀌지 않는다)
+  const ranked = filtered.slice(0, topN).map((r, i) => ({ ...r, _순위: i + 1 }));
+  cmItems = sortBy(ranked, cmSort, CM_SORT_TYPES);
+  const total = filtered.reduce((s, r) => s + r.매출금액, 0);
+
+  const rows = cmItems.map(r => {
+    const 비중 = r.매출금액 ? Math.round(r.대표금액 / r.매출금액 * 100) : 0;
+    return `<tr>
+      <td class="num" style="color:var(--text3)">${esc(r._순위)}</td>
+      <td onclick="goTxnByCompany('${jsq(r.회사)}')" style="cursor:pointer" title="거래내역 보기"><strong style="color:var(--blue)">${esc(r.회사)}</strong></td>
+      <td>${esc(r.제조사)}</td>
+      <td class="num"><strong>${fmt억(r.매출금액)}</strong></td>
+      <td class="num hide-mobile">${fmtNum(r.판매수량)}</td>
+      <td>
+        <span style="cursor:pointer;color:var(--blue)" onclick="showProductBuyers('${jsq(r.대표품목)}')" title="구매 거래처 전체 보기"><strong>${esc(r.대표품목)}</strong></span>
+        <div style="font-size:10px;color:var(--text3)">${fmt억(r.대표금액)} · 조합 매출의 ${비중}%${r.품목수 > 1 ? ` · 외 ${r.품목수 - 1}개 품목` : ''}</div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('cm-result').innerHTML = `
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
+      ${mfg ? esc(mfg) : '전체 제조사'} · 거래처×제조사 ${cmItems.length}개 표시 (조건에 맞는 ${filtered.length}개 중, 합계 ${fmt억(total)}) · 최근 2년 매출 기준 · 헤더 클릭시 정렬 · 대표품목 = 해당 조합에서 매출이 가장 큰 품목
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        <th>#</th>
+        ${thSort('거래처','회사',cmSort,'setCmSort')}
+        ${thSort('제조사','제조사',cmSort,'setCmSort')}
+        ${thSort('매출금액','매출금액',cmSort,'setCmSort','num')}
+        ${thSort('판매수량','판매수량',cmSort,'setCmSort','num hide-mobile')}
+        ${thSort('대표품목','대표품목',cmSort,'setCmSort')}
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+window.renderCompanyMfg = renderCompanyMfg;
+
+// 새 메뉴 안내 줄 (메뉴 위). 닫으면 이 안내(NOTICE_KEY)만 다시 뜨지 않는다.
+const NEW_NOTICE_KEY = 'daehan_notice_cm_v1';
+function dismissNewNotice() {
+  document.getElementById('new-menu-notice').style.display = 'none';
+  try { localStorage.setItem(NEW_NOTICE_KEY, '1'); } catch (e) {}
+}
+window.dismissNewNotice = dismissNewNotice;
+function openNewMenu() { showTab('panal'); setPaView('cm'); }
+window.openNewMenu = openNewMenu;
+(function () {
+  let seen = false;
+  try { seen = localStorage.getItem(NEW_NOTICE_KEY) === '1'; } catch (e) {}
+  const el = document.getElementById('new-menu-notice');
+  if (el && !seen) el.style.display = '';
+})();
 
 // ── 거래처 정보 ────────────────────────────────
 let infoItems = [];
