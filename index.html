@@ -106,8 +106,9 @@ tr:hover td{background:var(--bg3)}
 /* ── 새 메뉴 안내 줄 ── */
 .new-notice{display:flex;align-items:flex-start;gap:10px;padding:8px 16px;background:#16233d;border-bottom:1px solid var(--border2);font-size:12px;line-height:1.55;color:var(--text)}
 .new-badge{display:inline-block;background:var(--blue);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;letter-spacing:.3px;flex:none;line-height:1.5}
-.new-text{flex:1;cursor:pointer}
+.new-text{flex:1}
 .new-text b{color:var(--blue)}
+.new-text b[onclick]{cursor:pointer;text-decoration:underline;text-underline-offset:2px}
 .new-close{background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:0 2px;flex:none}
 .new-close:hover{color:var(--text)}
 /* ── 거래내역 탭 (Figma 시안 반영) ── */
@@ -188,7 +189,7 @@ th.bigo{min-width:110px}
 
   <div class="new-notice" id="new-menu-notice" style="display:none">
     <span class="new-badge">NEW</span>
-    <span class="new-text" onclick="openNewMenu()" title="눌러서 바로 가기"><b>제품분석 ▸ 거래처×제조사 순위</b> — 거래처별로 제조사 단위 매출 순위를 보고, 각 조합에서 매출이 가장 큰 <b>대표품목</b>을 확인할 수 있습니다. (최근 2년 기준 · 기존 화면은 '품목별 순위')</span>
+    <span class="new-text" title="아래 굵은 글씨를 누르면 바로 이동합니다"><b onclick="openNewMenu('cm')">제품분석 ▸ 거래처×제조사 순위</b>: 거래처별로 제조사 단위 매출 순위를 보고, 각 조합에서 매출이 가장 큰 <b>대표품목</b>을 확인합니다. · <b onclick="openNewMenu('mg')">제품분석 ▸ 이익률 분석</b>: 품목별 추정 원가(판매수량×구매단가)·이익·이익률을 보고 이익률이 낮은 품목을 찾습니다. (최근 2년 기준)</span>
     <button class="new-close" onclick="dismissNewNotice()" title="닫기">✕</button>
   </div>
 
@@ -279,6 +280,7 @@ th.bigo{min-width:110px}
       <div class="search-row">
         <button class="toggle-btn on" id="pa-view-btn-item" onclick="setPaView('item')">품목별 순위</button>
         <button class="toggle-btn" id="pa-view-btn-cm" onclick="setPaView('cm')">거래처×제조사 순위 <span class="new-badge">NEW</span></button>
+        <button class="toggle-btn" id="pa-view-btn-mg" onclick="setPaView('mg')">이익률 분석 <span class="new-badge">NEW</span></button>
       </div>
       <div id="pa-view-item">
       <div class="search-row">
@@ -311,6 +313,27 @@ th.bigo{min-width:110px}
           </select>
         </div>
         <div id="cm-result"></div>
+      </div>
+      <div id="pa-view-mg" style="display:none">
+        <div class="search-row">
+          <input class="search-input" id="mg-q" placeholder="품명 검색..." oninput="renderMargin()">
+          <select class="filter" id="mg-sp" onchange="renderMargin()">
+            <option value="">축종 전체</option>
+            <option value="양계">양계</option>
+            <option value="양돈">양돈</option>
+            <option value="축우">축우</option>
+            <option value="공통">공통</option>
+            <option value="미지정">미지정</option>
+          </select>
+          <select class="filter" id="mg-mfg" onchange="renderMargin()"><option value="">제조사 전체</option></select>
+          <select class="filter" id="mg-topn" onchange="renderMargin()">
+            <option value="20">상위 20개</option>
+            <option value="50" selected>상위 50개</option>
+            <option value="100">상위 100개</option>
+            <option value="99999">전체</option>
+          </select>
+        </div>
+        <div id="mg-result"></div>
       </div>
     </div>
 
@@ -2799,10 +2822,12 @@ const CM_SORT_TYPES = { 회사:'text', 제조사:'text', 매출금액:'num', 판
 
 function setPaView(v) {
   paView = v;
-  document.getElementById('pa-view-item').style.display = v === 'item' ? '' : 'none';
-  document.getElementById('pa-view-cm').style.display = v === 'cm' ? '' : 'none';
-  ['item','cm'].forEach(k => document.getElementById('pa-view-btn-'+k).classList.toggle('on', k === v));
+  ['item','cm','mg'].forEach(k => {
+    document.getElementById('pa-view-'+k).style.display = k === v ? '' : 'none';
+    document.getElementById('pa-view-btn-'+k).classList.toggle('on', k === v);
+  });
   if (v === 'cm' && !cmLoaded) searchCompanyMfg();
+  if (v === 'mg' && !mgLoaded) searchMargin();
 }
 window.setPaView = setPaView;
 
@@ -2897,14 +2922,148 @@ function renderCompanyMfg() {
 }
 window.renderCompanyMfg = renderCompanyMfg;
 
+// ── 제품분석 하위 메뉴: 이익률 분석 ─────────────────
+// 품목별 최근 2년 매출금액에서, 판매수량 × 제품의 구매최종단가(현재 기준 매입 단가)를
+// 추정 원가로 빼서 이익과 이익률을 계산한다. 구매단가가 없는 품목은 계산에서 제외한다.
+let mgRaw = [];
+let mgNoCost = [];
+let mgLoaded = false;
+let mgItems = [];
+let mgSort = { key: '이익', dir: 'desc' };
+const MG_SORT_TYPES = { 대분류:'text', 품명:'text', 매출금액:'num', 원가:'num', 이익:'num', 이익률:'num', 판매수량:'num' };
+const MG_LOW = 10;   // 이익률 이 값(%) 미만이면 낮음 표시
+
+function setMgSort(key) {
+  mgSort = toggleSort(mgSort, key, MG_SORT_TYPES[key]);
+  renderMargin();
+}
+window.setMgSort = setMgSort;
+
+async function searchMargin() {
+  loading('mg-result');
+  try {
+    await loadProductSpecies();
+    const [companies, prodSnap] = await Promise.all([loadCompanyItems(), fsAll('제품', 2000)]);
+    const prodInfo = new Map();
+    prodSnap.docs.forEach(d => { const r = d.data(); if (r.품명) prodInfo.set(r.품명, { 대분류: r.대분류 || '', 구매단가: +r.구매최종단가 || 0 }); });
+
+    const map = new Map();
+    for (const c of companies) {
+      for (const it of c.품목 || []) {
+        const cur = map.get(it.품명) || { 품명: it.품명, 매출금액: 0, 판매수량: 0 };
+        cur.매출금액 += (+it.금액 || 0);
+        cur.판매수량 += (+it.수량 || 0);
+        map.set(it.품명, cur);
+      }
+    }
+    const rows = [], noCost = [];
+    for (const r of map.values()) {
+      if (r.매출금액 <= 0) continue;
+      const info = prodInfo.get(r.품명) || {};
+      const 축종 = 제품축종[r.품명] || classifyProduct(r.품명);
+      const base = { 품명: r.품명, 대분류: info.대분류 || '미지정', 축종, 매출금액: r.매출금액, 판매수량: r.판매수량, 구매단가: info.구매단가 || 0 };
+      if (!base.구매단가 || r.판매수량 <= 0) { noCost.push(base); continue; }
+      const 원가 = base.구매단가 * r.판매수량;
+      const 이익 = r.매출금액 - 원가;
+      rows.push({ ...base, 원가, 이익, 이익률: 이익 / r.매출금액 * 100, 평균판매단가: r.매출금액 / r.판매수량 });
+    }
+    rows.sort((a, b) => b.이익 - a.이익);
+    mgRaw = rows;
+    mgNoCost = noCost.sort((a, b) => b.매출금액 - a.매출금액);
+    mgLoaded = true;
+
+    const sel = document.getElementById('mg-mfg');
+    const cur = sel.value;
+    const tot = new Map();
+    rows.forEach(r => tot.set(r.대분류, (tot.get(r.대분류) || 0) + r.매출금액));
+    sel.innerHTML = '<option value="">제조사 전체</option>' +
+      [...tot.entries()].sort((a, b) => b[1] - a[1]).map(([m]) => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+    sel.value = cur;
+    renderMargin();
+  } catch (e) {
+    document.getElementById('mg-result').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
+    console.error(e);
+  }
+}
+window.searchMargin = searchMargin;
+
+function renderMargin() {
+  if (!mgRaw.length) { empty('mg-result'); return; }
+  const q = document.getElementById('mg-q').value.trim().toLowerCase();
+  const sp = document.getElementById('mg-sp').value;
+  const mfg = document.getElementById('mg-mfg').value;
+  const topN = +document.getElementById('mg-topn').value || 50;
+
+  const filtered = mgRaw.filter(r => (!sp || r.축종 === sp) && (!mfg || r.대분류 === mfg) && (!q || r.품명.toLowerCase().includes(q)));
+  if (!filtered.length) { empty('mg-result'); return; }
+  const ranked = filtered.slice(0, topN).map((r, i) => ({ ...r, _순위: i + 1 }));   // 순위는 이익금액 기준 고정
+  mgItems = sortBy(ranked, mgSort, MG_SORT_TYPES);
+
+  const sum = filtered.reduce((a, r) => ({ 매출: a.매출 + r.매출금액, 원가: a.원가 + r.원가, 이익: a.이익 + r.이익 }), { 매출: 0, 원가: 0, 이익: 0 });
+  const 평균률 = sum.매출 ? sum.이익 / sum.매출 * 100 : 0;
+  const lowCnt = filtered.filter(r => r.이익률 < MG_LOW).length;
+  const rateColor = v => v < 0 ? 'var(--red)' : v < MG_LOW ? 'var(--amber)' : 'var(--green)';
+  const maxPos = Math.max(1, ...mgItems.map(r => Math.max(0, r.이익률)));
+
+  const rows = mgItems.map(r => {
+    const c = rateColor(r.이익률);
+    const w = Math.max(0, Math.min(100, r.이익률 / maxPos * 100));
+    return `<tr>
+      <td class="num" style="color:var(--text3)">${esc(r._순위)}</td>
+      <td class="hide-mobile">${esc(r.대분류)}</td>
+      <td><strong style="cursor:pointer;color:var(--blue)" onclick="showProductBuyers('${jsq(r.품명)}')" title="구매 거래처 전체 보기">${esc(r.품명)}</strong></td>
+      <td class="num">${fmt억(r.매출금액)}</td>
+      <td class="num hide-mobile" style="color:var(--text2)">${fmt억(r.원가)}</td>
+      <td class="num" style="color:${r.이익 < 0 ? 'var(--red)' : 'var(--text)'}"><strong>${r.이익 < 0 ? '-' : ''}${fmt억(Math.abs(r.이익))}</strong></td>
+      <td class="num">
+        <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end">
+          <div class="hide-mobile" style="width:56px;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden"><div style="width:${w.toFixed(1)}%;height:100%;background:${c}"></div></div>
+          <strong style="color:${c}">${r.이익률.toFixed(1)}%</strong>
+        </div>
+      </td>
+      <td class="num hide-mobile" style="font-size:11px;color:var(--text2)">${fmtNum(Math.round(r.평균판매단가))} / ${fmtNum(r.구매단가)}</td>
+    </tr>`;
+  }).join('');
+
+  const noCostNote = mgNoCost.length
+    ? `<div style="font-size:11px;color:var(--text3);margin-top:10px">구매단가가 없어 계산에서 제외된 품목 ${mgNoCost.length}개 (매출 ${fmt억(mgNoCost.reduce((s, r) => s + r.매출금액, 0))}): ${mgNoCost.slice(0, 8).map(r => esc(r.품명)).join(' · ')}${mgNoCost.length > 8 ? ' …' : ''}</div>` : '';
+
+  document.getElementById('mg-result').innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:12px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;font-size:12px">
+      <span>매출 <strong>${fmt억(sum.매출)}</strong></span>
+      <span>추정 원가 <strong>${fmt억(sum.원가)}</strong></span>
+      <span>추정 이익 <strong style="color:${rateColor(평균률)}">${sum.이익 < 0 ? '-' : ''}${fmt억(Math.abs(sum.이익))}</strong></span>
+      <span>평균 이익률 <strong style="color:${rateColor(평균률)}">${평균률.toFixed(1)}%</strong></span>
+      <span style="color:var(--text3)">${filtered.length}개 품목 중 이익률 ${MG_LOW}% 미만 ${lowCnt}개</span>
+    </div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
+      이익 상위 ${mgItems.length}개 (조건에 맞는 ${filtered.length}개 중) · 최근 2년 매출 기준 · 추정 원가 = 판매수량 × 현재 구매최종단가 · 이익률 = (매출−원가) ÷ 매출 · 헤더 클릭시 정렬 · 단가는 평균판매 / 구매
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        <th>#</th>
+        <th class="hide-mobile">제조사</th>
+        ${thSort('품명','품명',mgSort,'setMgSort')}
+        ${thSort('매출금액','매출금액',mgSort,'setMgSort','num')}
+        ${thSort('추정원가','원가',mgSort,'setMgSort','num hide-mobile')}
+        ${thSort('추정이익','이익',mgSort,'setMgSort','num')}
+        ${thSort('이익률','이익률',mgSort,'setMgSort','num')}
+        <th class="num hide-mobile">단가(판매/구매)</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    ${noCostNote}`;
+}
+window.renderMargin = renderMargin;
+
 // 새 메뉴 안내 줄 (메뉴 위). 닫으면 이 안내(NOTICE_KEY)만 다시 뜨지 않는다.
-const NEW_NOTICE_KEY = 'daehan_notice_cm_v1';
+const NEW_NOTICE_KEY = 'daehan_notice_cm_v2';
 function dismissNewNotice() {
   document.getElementById('new-menu-notice').style.display = 'none';
   try { localStorage.setItem(NEW_NOTICE_KEY, '1'); } catch (e) {}
 }
 window.dismissNewNotice = dismissNewNotice;
-function openNewMenu() { showTab('panal'); setPaView('cm'); }
+function openNewMenu(v) { showTab('panal'); setPaView(v || 'cm'); }
 window.openNewMenu = openNewMenu;
 (function () {
   let seen = false;
