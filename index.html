@@ -2094,9 +2094,6 @@ async function printHaccp() {
       `<td>${bigo}</td></tr>`;
   }).join('');
   const sum = withPrice ? rows.reduce((a, r) => a + (+r.공급가액 || 0), 0) : 0;
-  // 입금까지 반영된 현재 잔액(미수금): 거래처 한 곳을 검색해 잔액 정보가 있을 때만
-  const fb = single && single === ctx.targetCompany ? ctx.finalBalance : null;
-  const balBox = fb ? `<div class="box"><div><b>최종잔액 (미수금)</b><div class="meta" style="margin:2px 0 0">${fb.잔액기준일 ? esc(fb.잔액기준일) + ' ' + esc(fb.잔액기준계정 || '') + ' 명세표 기준 · 입금 반영' : '입금 반영'}</div></div><div class="amt">${fmtNum(+fb.잔액 || 0)}원</div></div>` : '';
   const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${esc(title)}</title><style>
   @page { size: A4; margin: 14mm 12mm; }
   body { font-family: 'Malgun Gothic','Apple SD Gothic Neo',sans-serif; color:#111; font-size:12px; margin:0; }
@@ -2109,8 +2106,6 @@ async function printHaccp() {
   tr { break-inside:avoid; }
   .n { text-align:right; white-space:nowrap; }
   .tot { margin-top:12px; text-align:right; font-size:13px; }
-  .box { border:1px solid #333; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
-  .box .amt { font-size:22px; font-weight:700; }
   .sign { margin-top:36px; text-align:right; font-size:14px; line-height:1.7; break-inside:avoid; }
   .sign .co { font-weight:700; font-size:16px; }
   .sign .who { position:relative; display:inline-block; }
@@ -2118,7 +2113,6 @@ async function printHaccp() {
 </style></head><body>
   <h1 style="white-space:pre">${esc(title)}</h1>
   <div class="meta">${period ? esc(period) + ' · ' : ''}출력일 ${todayStr()} · ${rows.length}건</div>
-  ${balBox}
   <table><thead><tr>${th.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>
   ${withPrice ? `<div class="tot">공급가액 합계 <b>${fmtNum(sum)}원</b></div>` : ''}
   <div class="sign">
