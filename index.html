@@ -1504,9 +1504,10 @@ function pickBalanceInvoices(lines, balance) {
 }
 
 // 출력물 제목: 농장명(이름) 거래내역 — 이름은 거래처 마스터의 담당자 이름 (없으면 농장명만)
-async function txnPrintTitle(company) {
+async function txnPrintTitle(company, withName = true, gap = ' ') {
   if (!company) return '거래내역';
   let who = company;
+  if (!withName) return who + gap + '거래내역';
   try {
     const cust = await fsAll('거래처');
     const d = cust.docs.find(x => x.data().회사 === company);
@@ -2076,7 +2077,7 @@ async function printHaccp() {
   // 팝업 차단을 피하려고 클릭 직후 동기적으로 창을 먼저 연다
   const w = window.open('', '_blank');
   if (!w) { alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용한 뒤 다시 눌러주세요.'); return; }
-  const title = await txnPrintTitle(single);
+  const title = await txnPrintTitle(single, false, '  ');   // HACCP 출력: "농장명  거래내역" (이름 없이)
   const period = (ctx.from || ctx.to) ? `${ctx.from || '처음'} ~ ${ctx.to || '끝'}` : '';
   const th = ['날짜'].concat(single ? [] : ['거래처'], ['품명', '단위', '수량'], withPrice ? ['단가', '금액'] : [], ['비고']);
   const body = rows.map(r => {
@@ -2110,9 +2111,9 @@ async function printHaccp() {
   .sign { margin-top:36px; text-align:right; font-size:14px; line-height:1.7; break-inside:avoid; }
   .sign .co { font-weight:700; font-size:16px; }
   .sign .who { position:relative; display:inline-block; }
-  .seal { position:absolute; right:-8px; top:60%; width:56px; height:56px; transform:translateY(-50%); mix-blend-mode:multiply; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .seal { position:absolute; right:-6px; top:60%; width:39px; height:39px; transform:translateY(-50%); mix-blend-mode:multiply; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 </style></head><body>
-  <h1>${esc(title)}</h1>
+  <h1 style="white-space:pre">${esc(title)}</h1>
   <div class="meta">${period ? esc(period) + ' · ' : ''}출력일 ${todayStr()} · ${rows.length}건</div>
   ${balBox}
   <table><thead><tr>${th.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>
@@ -2120,7 +2121,7 @@ async function printHaccp() {
   <div class="sign">
     <div>경기도 파주시 평화로37</div>
     <div class="co">대한가축약품</div>
-    <div class="who">조민형 (인)<img class="seal" src="${new URL('icons/seal-jominhyung.png', location.href).href}" alt=""></div>
+    <div class="who" style="white-space:pre">조  민  형 (인)<img class="seal" src="${new URL('icons/seal-jominhyung.png', location.href).href}" alt=""></div>
   </div>
 </body></html>`;
   w.document.open(); w.document.write(html); w.document.close();
