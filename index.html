@@ -136,6 +136,12 @@ tr:hover td{background:var(--bg3)}
 .txn-foot{display:flex;justify-content:space-between;gap:8px;padding:10px 20px;background:var(--bg3);font-size:11px;color:var(--text2)}
 .txn-foot span:last-child{color:var(--text3)}
 .txn-list{display:none}
+.hx-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px 16px;margin-bottom:10px;background:var(--bg2);border:1px solid var(--teal);border-radius:12px;font-size:12px;color:var(--text2)}
+.hx-bar b{color:var(--teal)}
+.hx-bar .grow{flex:1;min-width:120px}
+.hx-bar label{display:flex;gap:4px;align-items:center;cursor:pointer}
+.hx-ck{width:18px;height:18px;cursor:pointer;accent-color:var(--teal)}
+.hx-off td,.hx-off.txn-li{opacity:.4;text-decoration:line-through}
 @media(max-width:600px){
   .txn-panel{padding:14px;background:none;border:none;padding:0}
   .txn-panel .search-row{margin-bottom:12px}
@@ -368,6 +374,7 @@ th.bigo{min-width:110px}
         <button class="search-btn txn-xbtn" id="txn-excel-btn" onclick="exportTxnExcel()" style="background:var(--green)">엑셀 내보내기</button>
         <button class="search-btn txn-xbtn" id="txn-balpdf-btn" onclick="exportBalancePdf()" style="background:var(--amber);color:#1a1a1a" title="거래처 한 곳을 검색한 상태에서, 현재 잔액에 해당하는 매출 내역과 조회된 기간별 거래내역을 함께 PDF로 저장">잔액·기간내역 PDF</button>
         <button class="search-btn txn-xbtn" id="txn-balimg-btn" onclick="exportBalanceImage()" style="background:var(--purple)" title="잔액·기간내역 PDF와 같은 내용을 이미지(PNG)로 저장">이미지 저장</button>
+        <button class="search-btn txn-xbtn" id="txn-haccp-btn" onclick="toggleHaccpMode()" style="background:var(--teal);color:#0f1117" title="HACCP 제출용 거래내역: 매출 내역만 보이고, 항생제 등 빼야 할 줄의 체크를 풀어 출력">HACCP 출력 모드</button>
       </div>
       </div>
       <div id="txn-result"></div>
@@ -1890,15 +1897,22 @@ window.searchTxn = searchTxn;
 function renderTxnResult() {
   if (!txnItems.length || !txnCtx) { empty('txn-result'); return; }
   const { showBalance, balanceMap, targetCompany, finalBalance, matchedCompanyCount, company } = txnCtx;
-  const items = sortBy(txnItems, txnSort, TXN_SORT_TYPES);
+  let items = sortBy(txnItems, txnSort, TXN_SORT_TYPES);
+  // HACCP 출력 모드: 품목이 있는 매출 내역만 보이고, 줄마다 체크박스로 포함/제외를 고른다
+  if (txnHaccp) { items = items.filter(r => r.계정 === '매출' && r.품명); txnHaccpRows = items; }
+  const limit = txnHaccp ? 2000 : 500;
+  const hxCk = (i, r) => txnHaccp
+    ? `<input type="checkbox" class="hx-ck" data-hx="${i}" ${txnHaccpEx.has(r) ? '' : 'checked'} onchange="toggleHaccpRow(${i}, this.checked)" title="체크 해제하면 출력에서 제외">`
+    : '';
 
-  const rows = items.slice(0, 500).map(r => {
+  const rows = items.slice(0, limit).map((r, i) => {
     const tagCls = `tag-${esc(r.계정)}`;
     const bal = balanceMap[r.전표번호];
     const balCell = showBalance
       ? (bal!==undefined ? `<td class="num ${bal>0?'pos':bal<0?'neg':'zero'}"><strong>${fmtNum(bal)}</strong></td>` : `<td class="num" style="color:var(--text3)">-</td>`)
       : '';
-    return `<tr>
+    return `<tr data-hxrow="${i}" class="${txnHaccp && txnHaccpEx.has(r) ? 'hx-off' : ''}">
+      ${txnHaccp ? `<td style="width:44px">${hxCk(i, r)}</td>` : ''}
       <td style="color:var(--text3)">${esc(r.날짜||'')}</td>
       <td><strong>${esc(r.회사||'')}</strong></td>
       <td><span class="tag ${tagCls}">${esc(r.계정||'')}</span></td>
@@ -1914,7 +1928,7 @@ function renderTxnResult() {
   const balHeader = showBalance ? '<th class="num">잔액</th>' : '';
 
   // 안내 메시지
-  let infoMsg = `${txnItems.length}건`;
+  let infoMsg = txnHaccp ? `매출 ${items.length}건 (전체 ${txnItems.length}건 중)` : `${txnItems.length}건`;
   if (matchedCompanyCount > 1) {
     infoMsg += ` · ${matchedCompanyCount}개 거래처 매칭 (정확한 이름 입력시 잔액 표시)`;
   } else if (targetCompany && targetCompany !== company) {
@@ -1944,13 +1958,13 @@ function renderTxnResult() {
     const on = txnSort && txnSort.key === key;
     return `<span class="${cls||''}" onclick="setTxnSort('${key}')" style="${on?'color:var(--blue)':''}">${label}${on ? (txnSort.dir==='asc'?' ▲':' ▼') : ''}</span>`;
   };
-  const listRows = items.slice(0, 500).map(r => {
+  const listRows = items.slice(0, limit).map((r, i) => {
     const bal = balanceMap[r.전표번호];
     const amt = +r.공급가액 ? fmtNum(r.공급가액) : '-';
     const balTxt = showBalance && bal!==undefined ? `<div class="${bal>0?'pos':bal<0?'neg':'zero'}">${fmtNum(bal)}</div>` : '';
     const sub = bigoCell(r);
-    return `<div class="txn-li">
-      <div class="c1"><span>${esc((r.날짜||'').slice(5))}</span><span class="tag tag-${esc(r.계정)}">${esc(r.계정||'')}</span></div>
+    return `<div class="txn-li ${txnHaccp && txnHaccpEx.has(r) ? 'hx-off' : ''}" data-hxrow="${i}">
+      <div class="c1"><span>${esc((r.날짜||'').slice(5))}</span>${txnHaccp ? hxCk(i, r) : `<span class="tag tag-${esc(r.계정)}">${esc(r.계정||'')}</span>`}</div>
       <div class="c2"><div><strong>${esc(r.회사||'')}</strong></div><div>${esc(r.품명||'-')}</div>${sub?`<div class="sub">${sub}</div>`:''}</div>
       <div class="c3"><div>${amt}</div>${balTxt}</div>
     </div>`;
@@ -1959,11 +1973,24 @@ function renderTxnResult() {
       <div class="txn-lh">${sortLbl('날짜','날짜','')}${sortLbl('거래처','회사','grow')}${sortLbl('금액','공급가액','')}</div>
       ${listRows}</div>`;
 
+  const hxBar = txnHaccp ? `
+    <div class="hx-bar">
+      <span><b>HACCP 출력 모드</b> · 매출 내역만 표시 · 항생제 등 빼야 할 줄은 체크를 해제하세요</span>
+      <span class="grow"></span>
+      <span id="hx-count"></span>
+      <button class="toggle-btn" onclick="setHaccpAll(true)">모두 포함</button>
+      <button class="toggle-btn" onclick="setHaccpAll(false)">모두 제외</button>
+      <label><input type="checkbox" id="hx-price" class="hx-ck"> 단가·금액 포함</label>
+      <button class="search-btn" onclick="printHaccp()" style="background:var(--teal);color:#0f1117">출력</button>
+    </div>` : '';
+
   document.getElementById('txn-result').innerHTML = `
+    ${hxBar}
     ${finalBalanceCard}
     <div class="txn-card">
     <div class="tbl-wrap"><table>
       <thead><tr>
+        ${txnHaccp ? '<th style="width:44px">포함</th>' : ''}
         ${thSort('날짜','날짜',txnSort,'setTxnSort')}
         ${thSort('거래처','회사',txnSort,'setTxnSort')}
         ${thSort('구분','계정',txnSort,'setTxnSort')}
@@ -1979,7 +2006,88 @@ function renderTxnResult() {
     ${txnList}
     <div class="txn-foot"><span>${infoMsg}</span><span>헤더 클릭시 정렬</span></div>
     </div>`;
+  if (txnHaccp) updateHaccpCount();
 }
+
+// ── HACCP 출력 모드 ───────────────────────────────
+// 제외한 줄은 txnHaccpEx(객체 집합)에 담고, 출력 때 빼고 만든다.
+let txnHaccp = false;
+let txnHaccpEx = new Set();
+let txnHaccpRows = [];
+
+function toggleHaccpMode() {
+  txnHaccp = !txnHaccp;
+  txnHaccpEx = new Set();
+  const b = document.getElementById('txn-haccp-btn');
+  b.textContent = txnHaccp ? 'HACCP 모드 끄기' : 'HACCP 출력 모드';
+  b.style.outline = txnHaccp ? '2px solid var(--text)' : '';
+  renderTxnResult();
+}
+window.toggleHaccpMode = toggleHaccpMode;
+
+function updateHaccpCount() {
+  const el = document.getElementById('hx-count');
+  if (el) el.innerHTML = `출력 <b>${txnHaccpRows.filter(r => !txnHaccpEx.has(r)).length}</b> / ${txnHaccpRows.length}건`;
+}
+function toggleHaccpRow(i, on) {
+  const r = txnHaccpRows[i];
+  if (!r) return;
+  if (on) txnHaccpEx.delete(r); else txnHaccpEx.add(r);
+  document.querySelectorAll(`[data-hxrow="${i}"]`).forEach(el => el.classList.toggle('hx-off', !on));
+  document.querySelectorAll(`[data-hx="${i}"]`).forEach(el => { el.checked = on; });
+  updateHaccpCount();
+}
+window.toggleHaccpRow = toggleHaccpRow;
+function setHaccpAll(on) {
+  txnHaccpEx = on ? new Set() : new Set(txnHaccpRows);
+  renderTxnResult();
+}
+window.setHaccpAll = setHaccpAll;
+
+function printHaccp() {
+  const rows = txnHaccpRows.filter(r => !txnHaccpEx.has(r));
+  if (!rows.length) { alert('출력할 내역이 없습니다. 제외하지 않은 줄이 하나 이상 있어야 합니다.'); return; }
+  const withPrice = !!(document.getElementById('hx-price') || {}).checked;
+  const ctx = txnCtx || {};
+  const single = ctx.targetCompany || '';
+  const period = (ctx.from || ctx.to) ? `${ctx.from || '처음'} ~ ${ctx.to || '끝'}` : '';
+  const th = ['날짜'].concat(single ? [] : ['거래처'], ['품명', '단위', '수량'], withPrice ? ['단가', '금액'] : [], ['비고']);
+  const body = rows.map(r => {
+    const { 품목, 전표 } = txnBigo(r);
+    const bigo = [품목, 전표].filter(Boolean).map(esc).join(' / ');
+    return '<tr>' +
+      `<td>${esc(r.날짜 || '')}</td>` +
+      (single ? '' : `<td>${esc(r.회사 || '')}</td>`) +
+      `<td>${esc(r.품명 || '')}</td><td>${esc(r.단위 || '')}</td><td class="n">${+r.수량 ? fmtNum(r.수량) : ''}</td>` +
+      (withPrice ? `<td class="n">${+r.단가 ? fmtNum(r.단가) : ''}</td><td class="n">${+r.공급가액 ? fmtNum(r.공급가액) : ''}</td>` : '') +
+      `<td>${bigo}</td></tr>`;
+  }).join('');
+  const sum = withPrice ? rows.reduce((a, r) => a + (+r.공급가액 || 0), 0) : 0;
+  const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>HACCP 거래내역</title><style>
+  @page { size: A4; margin: 14mm 12mm; }
+  body { font-family: 'Malgun Gothic','Apple SD Gothic Neo',sans-serif; color:#111; font-size:12px; margin:0; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .meta { color:#555; font-size:11px; margin-bottom:12px; }
+  table { width:100%; border-collapse:collapse; }
+  thead { display:table-header-group; }
+  thead th { background:#eee; border:1px solid #999; padding:5px 6px; font-size:11px; }
+  td { border:1px solid #ccc; padding:4px 6px; }
+  tr { break-inside:avoid; }
+  .n { text-align:right; white-space:nowrap; }
+  .tot { margin-top:12px; text-align:right; font-size:13px; }
+</style></head><body>
+  <h1>HACCP 거래내역</h1>
+  <div class="meta">${single ? esc(single) + ' · ' : ''}${period ? esc(period) + ' · ' : ''}출력일 ${todayStr()} · ${rows.length}건</div>
+  <table><thead><tr>${th.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>
+  ${withPrice ? `<div class="tot">공급가액 합계 <b>${fmtNum(sum)}원</b></div>` : ''}
+</body></html>`;
+  const w = window.open('', '_blank');
+  if (!w) { alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용한 뒤 다시 눌러주세요.'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+  w.focus();
+  setTimeout(() => w.print(), 300);
+}
+window.printHaccp = printHaccp;
 
 // 거래내역 탭 첫 진입시 자동 표시: 당일 매출 기준, 당일 데이터가 아직 없으면 최근 매출일로 대체
 async function autoLoadTodayTxn() {
