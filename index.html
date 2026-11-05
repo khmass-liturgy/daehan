@@ -1500,7 +1500,20 @@ function pickBalanceInvoices(lines, balance) {
   return { invoices: picked, covered, shortfall: Math.max(0, balance - covered) };
 }
 
-function balanceStatementHtml(company, fb, res, period) {
+// 출력물 제목: 농장명(이름) 거래내역 — 이름은 거래처 마스터의 담당자 이름 (없으면 농장명만)
+async function txnPrintTitle(company) {
+  if (!company) return '거래내역';
+  let who = company;
+  try {
+    const cust = await fsAll('거래처');
+    const d = cust.docs.find(x => x.data().회사 === company);
+    const nm = d ? (d.data().이름 || '').trim() : '';
+    if (nm) who += `(${nm})`;
+  } catch (e) { console.error(e); }
+  return who + ' 거래내역';
+}
+
+function balanceStatementHtml(company, fb, res, period, title) {
   const balance = fb ? (+fb.잔액 || 0) : 0;
   const asOf = fb && fb.잔액기준일 ? `${esc(fb.잔액기준일)} ${esc(fb.잔액기준계정 || '')} 명세표 기준` : '';
 
@@ -1564,7 +1577,7 @@ function balanceStatementHtml(company, fb, res, period) {
   }
 
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8">
-<title>거래내역서_${esc(company)}_${todayStr()}</title>
+<title>${esc(title)}_${todayStr()}</title>
 <style>
   @page { size: A4; margin: 14mm 12mm; }
   body { font-family: 'Malgun Gothic','Apple SD Gothic Neo',sans-serif; color:#111; font-size:12px; margin:0; }
@@ -1586,7 +1599,7 @@ function balanceStatementHtml(company, fb, res, period) {
   .warn { color:#b00; font-size:11px; margin-top:10px; }
   .note { color:#666; font-size:10px; margin-top:14px; }
 </style></head><body>
-  <h1>거래처 거래내역서</h1>
+  <h1>${esc(title)}</h1>
   <div class="meta">출력일 ${todayStr()}${asOf ? ' · 잔액 ' + asOf : ''}</div>
   <div class="box"><div><b>${esc(company)}</b>${fb ? '<div class="meta" style="margin:2px 0 0">현재 미수금(잔액)</div>' : ''}</div>${fb ? `<div class="amt">${fmtNum(balance)}원</div>` : ''}</div>
   ${balSection}
@@ -1621,7 +1634,7 @@ async function buildBalanceStatement() {
     acct: document.getElementById('txn-acct').value, product: document.getElementById('txn-product').value.trim()
   };
   if (!res && !period.items.length) { alert('출력할 내역이 없습니다.'); return null; }
-  return { company, html: balanceStatementHtml(company, fb, res, period) };
+  return { company, html: balanceStatementHtml(company, fb, res, period, await txnPrintTitle(company)) };
 }
 
 async function exportBalancePdf() {
@@ -2060,18 +2073,7 @@ async function printHaccp() {
   // 팝업 차단을 피하려고 클릭 직후 동기적으로 창을 먼저 연다
   const w = window.open('', '_blank');
   if (!w) { alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용한 뒤 다시 눌러주세요.'); return; }
-  // 제목: 농장명(이름) 거래내역 — 이름은 거래처 마스터의 담당자 이름 (거래처 한 곳일 때만)
-  let who = '';
-  if (single) {
-    who = single;
-    try {
-      const cust = await fsAll('거래처');
-      const d = cust.docs.find(x => x.data().회사 === single);
-      const nm = d ? (d.data().이름 || '').trim() : '';
-      if (nm) who += `(${nm})`;
-    } catch (e) { console.error(e); }
-  }
-  const title = (who ? who + ' ' : '') + '거래내역';
+  const title = await txnPrintTitle(single);
   const period = (ctx.from || ctx.to) ? `${ctx.from || '처음'} ~ ${ctx.to || '끝'}` : '';
   const th = ['날짜'].concat(single ? [] : ['거래처'], ['품명', '단위', '수량'], withPrice ? ['단가', '금액'] : [], ['비고']);
   const body = rows.map(r => {
@@ -2104,8 +2106,8 @@ async function printHaccp() {
   .box .amt { font-size:22px; font-weight:700; }
   .sign { margin-top:36px; text-align:right; font-size:14px; line-height:1.7; break-inside:avoid; }
   .sign .co { font-weight:700; font-size:16px; }
-  .sign .who { display:inline-flex; align-items:center; gap:2px; }
-  .seal { display:inline-flex; align-items:center; justify-content:center; width:46px; height:46px; border:2.5px solid #d3202a; border-radius:50%; color:#d3202a; font-size:15px; font-weight:800; letter-spacing:-1px; transform:rotate(-8deg); margin-left:4px; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .sign .who { position:relative; display:inline-block; }
+  .seal { position:absolute; right:-8px; top:60%; width:56px; height:56px; transform:translateY(-50%); mix-blend-mode:multiply; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 </style></head><body>
   <h1>${esc(title)}</h1>
   <div class="meta">${period ? esc(period) + ' · ' : ''}출력일 ${todayStr()} · ${rows.length}건</div>
@@ -2115,12 +2117,18 @@ async function printHaccp() {
   <div class="sign">
     <div>경기도 파주시 평화로37</div>
     <div class="co">대한가축약품</div>
-    <div class="who">조민형 (인)<span class="seal">조민형</span></div>
+    <div class="who">조민형 (인)<img class="seal" src="${new URL('icons/seal-jominhyung.png', location.href).href}" alt=""></div>
   </div>
 </body></html>`;
   w.document.open(); w.document.write(html); w.document.close();
   w.focus();
-  setTimeout(() => w.print(), 300);
+  // 도장 이미지가 다 뜬 뒤에 인쇄 창을 연다 (최대 3초 대기)
+  const t0 = Date.now();
+  (function waitImg() {
+    const imgs = [...w.document.images];
+    if (imgs.every(i => i.complete) || Date.now() - t0 > 3000) w.print();
+    else setTimeout(waitImg, 100);
+  })();
 }
 window.printHaccp = printHaccp;
 
