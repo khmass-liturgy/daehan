@@ -384,6 +384,12 @@ th.bigo{min-width:110px}
         <button class="search-btn txn-xbtn" id="txn-balpdf-btn" onclick="exportBalancePdf()" style="background:var(--amber);color:#1a1a1a" title="거래처 한 곳을 검색한 상태에서, 현재 잔액에 해당하는 매출 내역과 조회된 기간별 거래내역을 함께 PDF로 저장">잔액·기간내역 PDF</button>
         <button class="search-btn txn-xbtn" id="txn-balimg-btn" onclick="exportBalanceImage()" style="background:var(--purple)" title="잔액·기간내역 PDF와 같은 내용을 이미지(PNG)로 저장">이미지 저장</button>
         <button class="search-btn txn-xbtn" id="txn-haccp-btn" onclick="toggleHaccpMode()" style="background:var(--teal);color:#0f1117" title="HACCP 제출용 거래내역: 매출 내역만 보이고, 항생제 등 빼야 할 줄의 체크를 풀어 출력">HACCP 출력 모드</button>
+        <button class="search-btn txn-xbtn" id="txn-kakao-btn" onclick="toggleTxnKakaoMenu()" style="background:#fee500;color:#3c1e1e" title="조회된 거래내역(매출)을 카카오톡으로 보냅니다">카톡전송</button>
+      </div>
+      <div id="txn-kk-menu" style="display:none;gap:8px;flex-wrap:wrap;align-items:center;padding:4px 0 0;font-size:12px;color:var(--text2)">
+        <span>조회된 매출 내역을 보냅니다 →</span>
+        <button class="toggle-btn" id="txn-kk-file" onclick="txnKakaoSend('file')" title="이미지 파일 자체를 첨부 (받는 분이 저장 가능, 휴대폰 권장)">이미지 파일로 공유</button>
+        <button class="toggle-btn" id="txn-kk-card" onclick="txnKakaoSend('card')" title="카카오톡 카드(링크)로 전송">카카오톡 카드로 전송</button>
       </div>
       </div>
       <div id="txn-result"></div>
@@ -1718,6 +1724,7 @@ function setTxnSort(key) {
 window.setTxnSort = setTxnSort;
 
 async function searchTxn() {
+  if (typeof haccpShareFiles !== 'undefined') haccpShareFiles = null;   // 새 조회면 만들어 둔 공유 이미지는 버린다
   const company = document.getElementById('txn-company').value.trim();
   const product = document.getElementById('txn-product').value.trim().toLowerCase();
   const acct    = document.getElementById('txn-acct').value;
@@ -2063,6 +2070,7 @@ function toggleHaccpRow(i, on) {
   if (!r) return;
   haccpShareFiles = null;   // 선택이 바뀌면 만들어 둔 공유 이미지는 버린다
   const sb = document.getElementById('hx-share-btn'); if (sb) sb.textContent = '이미지 파일 공유';
+  const kb = document.getElementById('txn-kk-file'); if (kb) kb.textContent = '이미지 파일로 공유';
   if (on) txnHaccpEx.delete(r); else txnHaccpEx.add(r);
   document.querySelectorAll(`[data-hxrow="${i}"]`).forEach(el => el.classList.toggle('hx-off', !on));
   document.querySelectorAll(`[data-hx="${i}"]`).forEach(el => { el.checked = on; });
@@ -2284,12 +2292,32 @@ async function gmailHaccp() {
 }
 window.gmailHaccp = gmailHaccp;
 
+// ── 거래내역 탭의 '카톡전송' 메뉴 (HACCP 모드가 아니어도 쓸 수 있다) ──
+function toggleTxnKakaoMenu() {
+  const m = document.getElementById('txn-kk-menu');
+  m.style.display = m.style.display === 'none' ? 'flex' : 'none';
+  document.getElementById('txn-kk-card').style.display = KAKAO_JS_KEY ? '' : 'none';
+}
+window.toggleTxnKakaoMenu = toggleTxnKakaoMenu;
+
+// 조회된 내역 중 품목이 있는 매출 줄을 전부 보낸다. (HACCP 모드 중이면 거기서 체크한 줄만)
+function txnKakaoSend(kind) {
+  if (!txnItems.length || !txnCtx) { alert('먼저 조회를 해주세요. 보낼 내역이 없습니다.'); return; }
+  if (!txnHaccp) {
+    txnHaccpEx = new Set();
+    txnHaccpRows = sortBy(txnItems, txnSort, TXN_SORT_TYPES).filter(r => r.계정 === '매출' && r.품명);
+  }
+  if (kind === 'card') kakaoSendHaccp(); else shareHaccp();
+}
+window.txnKakaoSend = txnKakaoSend;
+
 // 이미지 파일 공유: 기기의 공유창으로 PNG 파일 자체를 카카오톡 등에 첨부해 보낸다 (받는 사람이 저장 가능).
 // 공유창을 못 쓰는 브라우저(주로 PC)면 이미지를 저장한다.
 let haccpShareFiles = null;   // 이미지는 만들었지만 공유창 호출이 거부됐을 때 두 번째 클릭에 쓴다
 async function shareHaccp() {
-  const btn = document.getElementById('hx-share-btn');
-  const label = '이미지 파일 공유';
+  // HACCP 모드 막대의 버튼이 없을 때(거래내역 탭 '카톡전송' 메뉴로 부른 경우)에도 동작하도록 빈 객체로 대신한다
+  const btn = document.getElementById('hx-share-btn') || document.getElementById('txn-kk-file') || {};
+  const label = btn.id === 'txn-kk-file' ? '이미지 파일로 공유' : '이미지 파일 공유';
   try {
     if (!haccpShareFiles) {
       btn.disabled = true; btn.textContent = '이미지 만드는 중...';
