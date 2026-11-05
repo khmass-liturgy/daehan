@@ -384,12 +384,7 @@ th.bigo{min-width:110px}
         <button class="search-btn txn-xbtn" id="txn-balpdf-btn" onclick="exportBalancePdf()" style="background:var(--amber);color:#1a1a1a" title="거래처 한 곳을 검색한 상태에서, 현재 잔액에 해당하는 매출 내역과 조회된 기간별 거래내역을 함께 PDF로 저장">잔액·기간내역 PDF</button>
         <button class="search-btn txn-xbtn" id="txn-balimg-btn" onclick="exportBalanceImage()" style="background:var(--purple)" title="잔액·기간내역 PDF와 같은 내용을 이미지(PNG)로 저장">이미지 저장</button>
         <button class="search-btn txn-xbtn" id="txn-haccp-btn" onclick="toggleHaccpMode()" style="background:var(--teal);color:#0f1117" title="HACCP 제출용 거래내역: 매출 내역만 보이고, 항생제 등 빼야 할 줄의 체크를 풀어 출력">HACCP 출력 모드</button>
-        <button class="search-btn txn-xbtn" id="txn-kakao-btn" onclick="toggleTxnKakaoMenu()" style="background:#fee500;color:#3c1e1e" title="조회된 거래내역(매출)을 카카오톡으로 보냅니다">카톡전송</button>
-      </div>
-      <div id="txn-kk-menu" style="display:none;gap:8px;flex-wrap:wrap;align-items:center;padding:4px 0 0;font-size:12px;color:var(--text2)">
-        <span>조회된 매출 내역을 보냅니다 →</span>
-        <button class="toggle-btn" id="txn-kk-file" onclick="txnKakaoSend('file')" title="이미지 파일 자체를 첨부 (받는 분이 저장 가능, 휴대폰 권장)">이미지 파일로 공유</button>
-        <button class="toggle-btn" id="txn-kk-card" onclick="txnKakaoSend('card')" title="카카오톡 카드(링크)로 전송">카카오톡 카드로 전송</button>
+        <button class="search-btn txn-xbtn" id="txn-kakao-btn" onclick="txnKakaoSend()" style="background:#fee500;color:#3c1e1e" title="조회된 거래내역(매출)을 링크가 아닌 이미지로 카카오톡에 보냅니다 (휴대폰: 공유창, PC: 복사 후 채팅창에 붙여넣기)">카톡전송</button>
       </div>
       </div>
       <div id="txn-result"></div>
@@ -2014,9 +2009,8 @@ function renderTxnResult() {
       <button class="toggle-btn" onclick="setHaccpAll(false)">모두 제외</button>
       <label><input type="checkbox" id="hx-price" class="hx-ck" onchange="haccpShareFiles=null"> 단가·금액 포함</label>
       <button class="search-btn" onclick="printHaccp()" style="background:var(--teal);color:#0f1117">출력</button>
-      <button class="search-btn" id="hx-share-btn" onclick="shareHaccp()" style="background:#fee500;color:#1a1a1a" title="이미지 파일 자체를 카카오톡 등에 첨부해 보냅니다 (받는 사람이 저장 가능, 휴대폰 권장)">이미지 파일 공유</button>
+      <button class="search-btn" id="hx-share-btn" onclick="shareHaccp()" style="background:#fee500;color:#1a1a1a" title="링크가 아닌 이미지 파일 자체를 카카오톡에 보냅니다 (휴대폰: 공유창, PC: 복사 후 채팅창에 붙여넣기)">카카오톡 전송</button>
       <button class="search-btn" id="hx-gmail-btn" onclick="gmailHaccp()" style="background:#ea4335" title="이미지를 저장하고 Gmail 작성창을 엽니다 (저장된 이미지를 첨부)">Gmail 보내기</button>
-      ${KAKAO_JS_KEY ? `<button class="search-btn" id="hx-kakao-btn" onclick="kakaoSendHaccp()" style="background:#fee500;color:#3c1e1e;outline:2px solid #3c1e1e" title="카카오톡 친구·채팅방을 골라 이미지를 바로 보냅니다">카카오톡 전송</button>` : ''}
     </div>` : '';
 
   document.getElementById('txn-result').innerHTML = `
@@ -2069,8 +2063,8 @@ function toggleHaccpRow(i, on) {
   const r = txnHaccpRows[i];
   if (!r) return;
   haccpShareFiles = null;   // 선택이 바뀌면 만들어 둔 공유 이미지는 버린다
-  const sb = document.getElementById('hx-share-btn'); if (sb) sb.textContent = '이미지 파일 공유';
-  const kb = document.getElementById('txn-kk-file'); if (kb) kb.textContent = '이미지 파일로 공유';
+  const sb = document.getElementById('hx-share-btn'); if (sb) sb.textContent = '카카오톡 전송';
+  const kb = document.getElementById('txn-kakao-btn'); if (kb) kb.textContent = '카톡전송';
   if (on) txnHaccpEx.delete(r); else txnHaccpEx.add(r);
   document.querySelectorAll(`[data-hxrow="${i}"]`).forEach(el => el.classList.toggle('hx-off', !on));
   document.querySelectorAll(`[data-hx="${i}"]`).forEach(el => { el.checked = on; });
@@ -2190,65 +2184,6 @@ async function htmlToPngBlobs(html) {
   }
 }
 
-// ── 카카오톡 공식 전송 (카카오 SDK) ─────────────────
-// 사용하려면 카카오 디벨로퍼스(developers.kakao.com)에 앱을 등록하고 아래에 'JavaScript 키'를 넣는다.
-//  1) 내 애플리케이션 → 앱 만들기 → 앱 키의 'JavaScript 키' 복사
-//  2) 플랫폼 → Web → 사이트 도메인에 https://khmass-liturgy.github.io 등록
-//  3) 제품 설정 → 카카오톡 공유(메시지) 사용 설정
-// 키가 비어 있으면 '카카오톡 전송' 버튼은 나타나지 않는다. (JavaScript 키는 공개돼도 되는 값이며 등록한 도메인에서만 동작한다)
-const KAKAO_JS_KEY = '671da3fb68e72269f3c3dbadabdf8c0f';
-const KAKAO_SDK_URL = 'https://t1.kakaocdn.net/kakao_js_sdk/2.7.2/kakao.min.js';
-
-function loadKakaoSdk() {
-  return new Promise((resolve, reject) => {
-    const ready = () => {
-      if (!window.Kakao.isInitialized()) window.Kakao.init(KAKAO_JS_KEY);
-      resolve(window.Kakao);
-    };
-    if (window.Kakao) return ready();
-    const s = document.createElement('script');
-    s.src = KAKAO_SDK_URL; s.async = true;
-    s.onload = ready;
-    s.onerror = () => reject(new Error('카카오 SDK를 불러오지 못했습니다. 인터넷 연결을 확인해주세요.'));
-    document.head.appendChild(s);
-  });
-}
-
-// 출력물을 이미지로 만들어 카카오 서버에 올린 뒤, 카카오톡 공유창(친구·채팅방 선택)을 연다.
-async function kakaoSendHaccp() {
-  const btn = document.getElementById('hx-kakao-btn');
-  const label = btn ? btn.textContent : '';
-  if (!KAKAO_JS_KEY) { alert('카카오 앱 키가 설정되지 않았습니다.'); return; }
-  try {
-    if (btn) { btn.disabled = true; btn.textContent = '준비 중...'; }
-    const doc = await buildHaccpDoc();
-    if (!doc) return;
-    const blobs = await htmlToPngBlobs(doc.html);
-    if (blobs.length > 1 && !confirm(`내역이 길어 이미지가 ${blobs.length}장입니다. 카카오톡 전송은 1장만 보낼 수 있습니다.\n첫 장만 보낼까요? (전체를 보내려면 '카톡·메일 보내기'를 쓰세요)`)) return;
-    const Kakao = await loadKakaoSdk();
-    const file = new File([blobs[0]], 'haccp.png', { type: 'image/png' });
-    const up = await Kakao.Share.uploadImage({ file: [file] });
-    const img = up.infos.original;
-    Kakao.Share.sendDefault({
-      objectType: 'feed',
-      content: {
-        title: doc.title.replace(/\s+/g, ' '),
-        description: `${doc.rows.length}건 · ${todayStr()} · 대한가축약품`,
-        imageUrl: img.url, imageWidth: img.width, imageHeight: img.height,
-        link: { mobileWebUrl: img.url, webUrl: img.url }
-      },
-      buttons: [{ title: '이미지 크게 보기', link: { mobileWebUrl: img.url, webUrl: img.url } }]
-    });
-  } catch (e) {
-    alert('카카오톡 전송에 실패했습니다: ' + (e && e.message ? e.message : JSON.stringify(e)));
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = label; }
-  }
-}
-window.kakaoSendHaccp = kakaoSendHaccp;
-
-// 카카오톡·이메일 등으로 보내기: 휴대폰/PC의 공유창을 열어 앱(카톡, 메일 …)을 고르게 한다.
-// 공유창을 못 쓰는 환경이면 이미지를 저장하고 메일 작성창을 연다.
 function saveFilesToDisk(files) {
   files.forEach(f => {
     const a = document.createElement('a');
@@ -2293,31 +2228,26 @@ async function gmailHaccp() {
 window.gmailHaccp = gmailHaccp;
 
 // ── 거래내역 탭의 '카톡전송' 메뉴 (HACCP 모드가 아니어도 쓸 수 있다) ──
-function toggleTxnKakaoMenu() {
-  const m = document.getElementById('txn-kk-menu');
-  m.style.display = m.style.display === 'none' ? 'flex' : 'none';
-  document.getElementById('txn-kk-card').style.display = KAKAO_JS_KEY ? '' : 'none';
-}
-window.toggleTxnKakaoMenu = toggleTxnKakaoMenu;
-
 // 조회된 내역 중 품목이 있는 매출 줄을 전부 보낸다. (HACCP 모드 중이면 거기서 체크한 줄만)
-function txnKakaoSend(kind) {
+function txnKakaoSend() {
   if (!txnItems.length || !txnCtx) { alert('먼저 조회를 해주세요. 보낼 내역이 없습니다.'); return; }
   if (!txnHaccp) {
     txnHaccpEx = new Set();
     txnHaccpRows = sortBy(txnItems, txnSort, TXN_SORT_TYPES).filter(r => r.계정 === '매출' && r.품명);
   }
-  if (kind === 'card') kakaoSendHaccp(); else shareHaccp();
+  shareHaccp();
 }
 window.txnKakaoSend = txnKakaoSend;
 
-// 이미지 파일 공유: 기기의 공유창으로 PNG 파일 자체를 카카오톡 등에 첨부해 보낸다 (받는 사람이 저장 가능).
-// 공유창을 못 쓰는 브라우저(주로 PC)면 이미지를 저장한다.
+// 카카오톡 전송: 링크가 아닌 이미지 파일 자체를 보낸다 (받는 사람이 저장 가능).
+// 카카오 공식 전송 API(SDK)는 링크 카드만 보낼 수 있어서, 이미지 파일은 기기 공유창으로 보낸다.
+// 휴대폰: 공유창에서 카카오톡을 고른다. 공유창을 못 쓰는 브라우저(주로 PC): 이미지를 클립보드에 복사하고 저장해, 카톡 채팅창에 붙여넣게 한다.
 let haccpShareFiles = null;   // 이미지는 만들었지만 공유창 호출이 거부됐을 때 두 번째 클릭에 쓴다
 async function shareHaccp() {
-  // HACCP 모드 막대의 버튼이 없을 때(거래내역 탭 '카톡전송' 메뉴로 부른 경우)에도 동작하도록 빈 객체로 대신한다
-  const btn = document.getElementById('hx-share-btn') || document.getElementById('txn-kk-file') || {};
-  const label = btn.id === 'txn-kk-file' ? '이미지 파일로 공유' : '이미지 파일 공유';
+  // 두 곳(HACCP 막대, 거래내역 탭 버튼)에서 부르므로 보이는 쪽 버튼을 쓴다 (없으면 빈 객체)
+  const hx = document.getElementById('hx-share-btn');
+  const btn = (hx && hx.offsetParent) ? hx : (document.getElementById('txn-kakao-btn') || {});
+  const label = btn.id === 'txn-kakao-btn' ? '카톡전송' : '카카오톡 전송';
   try {
     if (!haccpShareFiles) {
       btn.disabled = true; btn.textContent = '이미지 만드는 중...';
@@ -2342,9 +2272,19 @@ async function shareHaccp() {
         } else throw e;
       }
     } else {
+      // 공유창 미지원(PC): 이미지를 클립보드에 복사(첫 장)하고 파일로도 저장한다
+      let copied = false;
+      try {
+        if (navigator.clipboard && window.ClipboardItem) {
+          await navigator.clipboard.write([new ClipboardItem({ 'image/png': files[0] })]);
+          copied = true;
+        }
+      } catch (e) { console.error(e); }
       saveFilesToDisk(files);
       haccpShareFiles = null;
-      alert('이 브라우저는 파일 공유창을 지원하지 않아 이미지를 저장했습니다. 휴대폰에서 열면 카카오톡으로 이미지 파일을 바로 보낼 수 있습니다.');
+      alert(copied
+        ? '이미지를 복사하고 파일로도 저장했습니다.\n카카오톡 채팅창을 열어 Ctrl+V로 붙여넣고 전송하세요.' + (files.length > 1 ? `\n(이미지가 ${files.length}장이라 복사는 첫 장만 되었습니다. 나머지는 저장된 파일을 첨부하세요.)` : '')
+        : '이미지를 파일로 저장했습니다.\n카카오톡 채팅창에 저장된 이미지를 끌어다 놓거나 첨부해 보내세요.');
     }
   } catch (e) {
     haccpShareFiles = null;
