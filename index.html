@@ -2251,7 +2251,9 @@ function saveFilesToDisk(files) {
 }
 // Gmail 새 메일 작성창 주소 (웹 Gmail은 첨부파일을 주소로 넘길 수 없다)
 function gmailComposeUrl(subject, body) {
-  return 'https://mail.google.com/mail/?view=cm&fs=1&su=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+  // authuser: 이 앱에 로그인한 Google 계정으로 Gmail을 연다 (브라우저에 로그인된 다른 계정이 기본이어도)
+  const au = window.loginEmail ? '&authuser=' + encodeURIComponent(window.loginEmail) : '';
+  return 'https://mail.google.com/mail/?view=cm&fs=1' + au + '&su=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
 }
 
 // Gmail로 보내기: 이미지를 저장하고 Gmail 작성창을 연다. 저장된 이미지는 클립(첨부) 버튼이나 끌어다 놓기로 붙인다.

@@ -70,6 +70,7 @@ async function initializeLogin() {
         return;
       }
       message.textContent = '';
+      window.loginEmail = claims.email;   // Gmail 보내기가 같은 계정으로 열리도록 index.html에서 사용
       document.getElementById('login-screen').classList.add('hide');
       document.getElementById('app').classList.add('show');
       if (!opened) {
