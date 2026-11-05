@@ -2074,7 +2074,9 @@ async function printHaccp() {
   if (!rows.length) { alert('출력할 내역이 없습니다. 제외하지 않은 줄이 하나 이상 있어야 합니다.'); return; }
   const withPrice = !!(document.getElementById('hx-price') || {}).checked;
   const ctx = txnCtx || {};
-  const single = ctx.targetCompany || '';
+  // 출력할 줄이 모두 같은 거래처면 그 거래처를 제목에 넣고 거래처 열은 뺀다 (검색어가 여러 거래처에 걸려도 마찬가지)
+  const cos = [...new Set(rows.map(r => r.회사 || ''))];
+  const single = cos.length === 1 ? cos[0] : (ctx.targetCompany || '');
   // 팝업 차단을 피하려고 클릭 직후 동기적으로 창을 먼저 연다
   const w = window.open('', '_blank');
   if (!w) { alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용한 뒤 다시 눌러주세요.'); return; }
@@ -2093,7 +2095,7 @@ async function printHaccp() {
   }).join('');
   const sum = withPrice ? rows.reduce((a, r) => a + (+r.공급가액 || 0), 0) : 0;
   // 입금까지 반영된 현재 잔액(미수금): 거래처 한 곳을 검색해 잔액 정보가 있을 때만
-  const fb = single ? ctx.finalBalance : null;
+  const fb = single && single === ctx.targetCompany ? ctx.finalBalance : null;
   const balBox = fb ? `<div class="box"><div><b>최종잔액 (미수금)</b><div class="meta" style="margin:2px 0 0">${fb.잔액기준일 ? esc(fb.잔액기준일) + ' ' + esc(fb.잔액기준계정 || '') + ' 명세표 기준 · 입금 반영' : '입금 반영'}</div></div><div class="amt">${fmtNum(+fb.잔액 || 0)}원</div></div>` : '';
   const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${esc(title)}</title><style>
   @page { size: A4; margin: 14mm 12mm; }
