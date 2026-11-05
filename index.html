@@ -55,6 +55,8 @@ header{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 16p
   #fs-reads{display:none}
 }
 .badge{background:var(--bg3);border:1px solid var(--border2);border-radius:20px;padding:3px 10px;font-size:11px;color:var(--text2)}
+#data-date{font-size:22px;padding:6px 18px}
+@media (max-width:600px){#data-date{font-size:11px;padding:3px 10px}}
 
 nav{background:var(--bg2);border-bottom:1px solid var(--border);display:flex;overflow-x:auto;-webkit-overflow-scrolling:touch}
 nav::-webkit-scrollbar{display:none}
@@ -196,7 +198,7 @@ th.bigo{min-width:110px}
 <div id="app">
   <header>
     <div class="logo"><img src="icons/icon-192.png" alt=""><div>대한<span>가축약품</span> 클라우드</div></div>
-    <div style="display:flex;align-items:center;gap:8px"><span id="fs-reads" title="이번 접속에서 읽은 Firestore 문서 수 (무료 한도: 하루 5만건)" style="font-size:10px;color:var(--text3)"></span><div class="badge" id="data-date">-</div></div>
+    <div style="display:flex;align-items:center;gap:8px"><span id="fs-reads" title="이번 접속에서 읽은 Firestore 문서 수 (무료 한도: 하루 5만건)" style="font-size:20px;color:var(--text3)"></span><div class="badge" id="data-date">-</div></div>
     <button class="toggle-btn" id="logout-btn">로그아웃</button>
   </header>
 
