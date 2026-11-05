@@ -58,10 +58,11 @@ header{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 16p
 #data-date{font-size:22px;padding:6px 18px}
 @media (max-width:600px){#data-date{font-size:11px;padding:3px 10px}}
 
-nav{background:var(--bg2);border-bottom:1px solid var(--border);display:flex;overflow-x:auto;-webkit-overflow-scrolling:touch}
+nav{background:var(--bg2);border-bottom:1px solid var(--border);display:flex;gap:8px;padding:10px 12px;overflow-x:auto;-webkit-overflow-scrolling:touch}
 nav::-webkit-scrollbar{display:none}
-.nav-tab{flex-shrink:0;padding:12px 20px;font-size:13px;font-weight:500;color:var(--text2);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
-.nav-tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+.nav-tab{flex-shrink:0;padding:9px 18px;font-size:14px;font-weight:600;color:var(--text2);cursor:pointer;background:var(--bg3);border:1px solid var(--border2);border-radius:10px;white-space:nowrap;transition:border-color .15s,color .15s}
+.nav-tab:hover{border-color:var(--blue);color:var(--text)}
+.nav-tab.active{color:#fff;background:var(--blue);border-color:var(--blue)}
 
 main{flex:1;padding:16px;max-width:1100px;width:100%;margin:0 auto}
 
@@ -198,7 +199,7 @@ th.bigo{min-width:110px}
 <div id="app">
   <header>
     <div class="logo"><img src="icons/icon-192.png" alt=""><div>대한<span>가축약품</span> 클라우드</div></div>
-    <div style="display:flex;align-items:center;gap:8px"><span id="fs-reads" title="이번 접속에서 읽은 Firestore 문서 수 (무료 한도: 하루 5만건)" style="font-size:20px;color:var(--text3)"></span><div class="badge" id="data-date">-</div></div>
+    <div style="display:flex;align-items:center;gap:8px"><span id="fs-reads" title="이번 접속에서 읽은 Firestore 문서 수 / 무료 한도 하루 5만건. 남은 횟수는 이 화면 기준 추정이며, 다른 기기·직원이 읽은 만큼은 포함되지 않습니다" style="font-size:20px;color:var(--text3)"></span><div class="badge" id="data-date">-</div></div>
     <button class="toggle-btn" id="logout-btn">로그아웃</button>
   </header>
 
@@ -484,11 +485,13 @@ const FS_TTL = 30 * 60 * 1000;     // 30분 (데이터는 월 단위로 갱신�
 const fsStore = new Map();         // key -> { t, p(Promise) }
 const fsFlags = new Map();         // key -> 마지막 표시 시각
 window.__fsReads = 0;
+const FS_DAILY_LIMIT = 50000;      // Firebase 무료 한도: 하루 읽기 5만건 (프로젝트 전체 합계)
 
 function fsCount(n) {
   window.__fsReads += n;
   const el = document.getElementById('fs-reads');
-  if (el) el.textContent = '읽기 ' + window.__fsReads.toLocaleString();
+  if (el) el.textContent = '읽기 ' + window.__fsReads.toLocaleString() + ' / ' + FS_DAILY_LIMIT.toLocaleString()
+    + ' (남음 ' + Math.max(0, FS_DAILY_LIMIT - window.__fsReads).toLocaleString() + ')';
 }
 // getDocs/getDoc 이 실제로 읽은 문서 수를 센다 (헤더에 표시 · 콘솔 window.__fsReads)
 function installReadCounter() {
