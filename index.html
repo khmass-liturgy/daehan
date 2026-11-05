@@ -2102,12 +2102,21 @@ async function printHaccp() {
   .tot { margin-top:12px; text-align:right; font-size:13px; }
   .box { border:1px solid #333; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
   .box .amt { font-size:22px; font-weight:700; }
+  .sign { margin-top:36px; text-align:right; font-size:14px; line-height:1.7; break-inside:avoid; }
+  .sign .co { font-weight:700; font-size:16px; }
+  .sign .who { display:inline-flex; align-items:center; gap:2px; }
+  .seal { display:inline-flex; align-items:center; justify-content:center; width:46px; height:46px; border:2.5px solid #d3202a; border-radius:50%; color:#d3202a; font-size:15px; font-weight:800; letter-spacing:-1px; transform:rotate(-8deg); margin-left:4px; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 </style></head><body>
   <h1>${esc(title)}</h1>
   <div class="meta">${period ? esc(period) + ' · ' : ''}출력일 ${todayStr()} · ${rows.length}건</div>
   ${balBox}
   <table><thead><tr>${th.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>
   ${withPrice ? `<div class="tot">공급가액 합계 <b>${fmtNum(sum)}원</b></div>` : ''}
+  <div class="sign">
+    <div>경기도 파주시 평화로37</div>
+    <div class="co">대한가축약품</div>
+    <div class="who">조민형 (인)<span class="seal">조민형</span></div>
+  </div>
 </body></html>`;
   w.document.open(); w.document.write(html); w.document.close();
   w.focus();
