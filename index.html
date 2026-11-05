@@ -2005,9 +2005,8 @@ function renderTxnResult() {
       <span id="hx-count"></span>
       <button class="toggle-btn" onclick="setHaccpAll(true)">모두 포함</button>
       <button class="toggle-btn" onclick="setHaccpAll(false)">모두 제외</button>
-      <label><input type="checkbox" id="hx-price" class="hx-ck" onchange="haccpShareFiles=null"> 단가·금액 포함</label>
+      <label><input type="checkbox" id="hx-price" class="hx-ck"> 단가·금액 포함</label>
       <button class="search-btn" onclick="printHaccp()" style="background:var(--teal);color:#0f1117">출력</button>
-      <button class="search-btn" id="hx-share-btn" onclick="shareHaccp()" style="background:#fee500;color:#1a1a1a" title="카카오톡·이메일 등으로 이미지로 보냅니다">카톡·메일 보내기</button>
       <button class="search-btn" id="hx-gmail-btn" onclick="gmailHaccp()" style="background:#ea4335" title="이미지를 저장하고 Gmail 작성창을 엽니다 (저장된 이미지를 첨부)">Gmail 보내기</button>
       ${KAKAO_JS_KEY ? `<button class="search-btn" id="hx-kakao-btn" onclick="kakaoSendHaccp()" style="background:#fee500;color:#3c1e1e;outline:2px solid #3c1e1e" title="카카오톡 친구·채팅방을 골라 이미지를 바로 보냅니다">카카오톡 전송</button>` : ''}
     </div>` : '';
@@ -2045,7 +2044,6 @@ let txnHaccpRows = [];
 
 function toggleHaccpMode() {
   txnHaccp = !txnHaccp;
-  haccpShareFiles = null;
   txnHaccpEx = new Set();
   const b = document.getElementById('txn-haccp-btn');
   b.textContent = txnHaccp ? 'HACCP 모드 끄기' : 'HACCP 출력 모드';
@@ -2061,8 +2059,6 @@ function updateHaccpCount() {
 function toggleHaccpRow(i, on) {
   const r = txnHaccpRows[i];
   if (!r) return;
-  haccpShareFiles = null;   // 선택이 바뀌면 만들어 둔 공유 이미지는 버린다
-  const sb = document.getElementById('hx-share-btn'); if (sb) sb.textContent = '카톡·메일 보내기';
   if (on) txnHaccpEx.delete(r); else txnHaccpEx.add(r);
   document.querySelectorAll(`[data-hxrow="${i}"]`).forEach(el => el.classList.toggle('hx-off', !on));
   document.querySelectorAll(`[data-hx="${i}"]`).forEach(el => { el.checked = on; });
@@ -2070,7 +2066,6 @@ function toggleHaccpRow(i, on) {
 }
 window.toggleHaccpRow = toggleHaccpRow;
 function setHaccpAll(on) {
-  haccpShareFiles = null;
   txnHaccpEx = on ? new Set() : new Set(txnHaccpRows);
   renderTxnResult();
 }
@@ -2281,50 +2276,6 @@ async function gmailHaccp() {
   }
 }
 window.gmailHaccp = gmailHaccp;
-
-let haccpShareFiles = null;   // 이미지는 만들었지만 공유창 호출이 거부됐을 때 두 번째 클릭에 쓴다
-async function shareHaccp() {
-  const btn = document.getElementById('hx-share-btn');
-  const label = '카톡·메일 보내기';
-  try {
-    if (!haccpShareFiles) {
-      btn.disabled = true; btn.textContent = '이미지 만드는 중...';
-      const doc = await buildHaccpDoc();
-      if (!doc) return;
-      const blobs = await htmlToPngBlobs(doc.html);
-      const base = (doc.title.replace(/\s+/g, ' ') + '_' + todayStr()).replace(/[\\/:*?"<>|]/g, '_');
-      haccpShareFiles = { title: doc.title, files: blobs.map((b, i) =>
-        new File([b], base + (blobs.length > 1 ? `_${i + 1}of${blobs.length}` : '') + '.png', { type: 'image/png' })) };
-    }
-    const { title, files } = haccpShareFiles;
-    if (navigator.canShare && navigator.canShare({ files })) {
-      try {
-        await navigator.share({ files, title, text: title });
-        haccpShareFiles = null;
-      } catch (e) {
-        if (e.name === 'AbortError') { haccpShareFiles = null; }   // 사용자가 공유창을 닫음
-        else if (e.name === 'NotAllowedError') {                  // 이미지 만드는 사이 클릭 권한이 지남 → 한 번 더 누르게 함
-          btn.textContent = '공유하기 (준비됨)';
-          btn.disabled = false;
-          return;
-        } else throw e;
-      }
-    } else {
-      // 공유창 미지원: 이미지 저장 + 메일 작성창 (메일은 첨부를 자동으로 못 하므로 저장된 파일을 직접 첨부)
-      saveFilesToDisk(files);
-      haccpShareFiles = null;
-      alert('이 브라우저는 공유창을 지원하지 않아 이미지를 저장했습니다.\nGmail 작성창이 열리면 저장된 이미지를 첨부해 보내주세요. 카카오톡은 휴대폰에서 이 화면을 열면 바로 공유할 수 있습니다.');
-      window.open(gmailComposeUrl(title.replace(/\s+/g, ' '), title.replace(/\s+/g, ' ') + ' 첨부합니다.\n\n대한가축약품'), '_blank');
-    }
-  } catch (e) {
-    haccpShareFiles = null;
-    alert('보내기에 실패했습니다: ' + e.message);
-  } finally {
-    btn.disabled = false;
-    if (!haccpShareFiles) btn.textContent = label;
-  }
-}
-window.shareHaccp = shareHaccp;
 
 // 거래내역 탭 첫 진입시 자동 표시: 당일 매출 기준, 당일 데이터가 아직 없으면 최근 매출일로 대체
 async function autoLoadTodayTxn() {
