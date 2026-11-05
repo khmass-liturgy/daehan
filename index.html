@@ -2008,6 +2008,8 @@ function renderTxnResult() {
       <label><input type="checkbox" id="hx-price" class="hx-ck" onchange="haccpShareFiles=null"> 단가·금액 포함</label>
       <button class="search-btn" onclick="printHaccp()" style="background:var(--teal);color:#0f1117">출력</button>
       <button class="search-btn" id="hx-share-btn" onclick="shareHaccp()" style="background:#fee500;color:#1a1a1a" title="카카오톡·이메일 등으로 이미지로 보냅니다">카톡·메일 보내기</button>
+      <button class="search-btn" id="hx-gmail-btn" onclick="gmailHaccp()" style="background:#ea4335" title="이미지를 저장하고 Gmail 작성창을 엽니다 (저장된 이미지를 첨부)">Gmail 보내기</button>
+      ${KAKAO_JS_KEY ? `<button class="search-btn" id="hx-kakao-btn" onclick="kakaoSendHaccp()" style="background:#fee500;color:#3c1e1e;outline:2px solid #3c1e1e" title="카카오톡 친구·채팅방을 골라 이미지를 바로 보냅니다">카카오톡 전송</button>` : ''}
     </div>` : '';
 
   document.getElementById('txn-result').innerHTML = `
@@ -2180,8 +2182,106 @@ async function htmlToPngBlobs(html) {
   }
 }
 
+// ── 카카오톡 공식 전송 (카카오 SDK) ─────────────────
+// 사용하려면 카카오 디벨로퍼스(developers.kakao.com)에 앱을 등록하고 아래에 'JavaScript 키'를 넣는다.
+//  1) 내 애플리케이션 → 앱 만들기 → 앱 키의 'JavaScript 키' 복사
+//  2) 플랫폼 → Web → 사이트 도메인에 https://khmass-liturgy.github.io 등록
+//  3) 제품 설정 → 카카오톡 공유(메시지) 사용 설정
+// 키가 비어 있으면 '카카오톡 전송' 버튼은 나타나지 않는다. (JavaScript 키는 공개돼도 되는 값이며 등록한 도메인에서만 동작한다)
+const KAKAO_JS_KEY = '';
+const KAKAO_SDK_URL = 'https://t1.kakaocdn.net/kakao_js_sdk/2.7.2/kakao.min.js';
+
+function loadKakaoSdk() {
+  return new Promise((resolve, reject) => {
+    const ready = () => {
+      if (!window.Kakao.isInitialized()) window.Kakao.init(KAKAO_JS_KEY);
+      resolve(window.Kakao);
+    };
+    if (window.Kakao) return ready();
+    const s = document.createElement('script');
+    s.src = KAKAO_SDK_URL; s.async = true;
+    s.onload = ready;
+    s.onerror = () => reject(new Error('카카오 SDK를 불러오지 못했습니다. 인터넷 연결을 확인해주세요.'));
+    document.head.appendChild(s);
+  });
+}
+
+// 출력물을 이미지로 만들어 카카오 서버에 올린 뒤, 카카오톡 공유창(친구·채팅방 선택)을 연다.
+async function kakaoSendHaccp() {
+  const btn = document.getElementById('hx-kakao-btn');
+  const label = btn ? btn.textContent : '';
+  if (!KAKAO_JS_KEY) { alert('카카오 앱 키가 설정되지 않았습니다.'); return; }
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = '준비 중...'; }
+    const doc = await buildHaccpDoc();
+    if (!doc) return;
+    const blobs = await htmlToPngBlobs(doc.html);
+    if (blobs.length > 1 && !confirm(`내역이 길어 이미지가 ${blobs.length}장입니다. 카카오톡 전송은 1장만 보낼 수 있습니다.\n첫 장만 보낼까요? (전체를 보내려면 '카톡·메일 보내기'를 쓰세요)`)) return;
+    const Kakao = await loadKakaoSdk();
+    const file = new File([blobs[0]], 'haccp.png', { type: 'image/png' });
+    const up = await Kakao.Share.uploadImage({ file: [file] });
+    const img = up.infos.original;
+    Kakao.Share.sendDefault({
+      objectType: 'feed',
+      content: {
+        title: doc.title.replace(/\s+/g, ' '),
+        description: `${doc.rows.length}건 · ${todayStr()} · 대한가축약품`,
+        imageUrl: img.url, imageWidth: img.width, imageHeight: img.height,
+        link: { mobileWebUrl: img.url, webUrl: img.url }
+      },
+      buttons: [{ title: '이미지 크게 보기', link: { mobileWebUrl: img.url, webUrl: img.url } }]
+    });
+  } catch (e) {
+    alert('카카오톡 전송에 실패했습니다: ' + (e && e.message ? e.message : JSON.stringify(e)));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
+}
+window.kakaoSendHaccp = kakaoSendHaccp;
+
 // 카카오톡·이메일 등으로 보내기: 휴대폰/PC의 공유창을 열어 앱(카톡, 메일 …)을 고르게 한다.
 // 공유창을 못 쓰는 환경이면 이미지를 저장하고 메일 작성창을 연다.
+function saveFilesToDisk(files) {
+  files.forEach(f => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(f); a.download = f.name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  });
+}
+// Gmail 새 메일 작성창 주소 (웹 Gmail은 첨부파일을 주소로 넘길 수 없다)
+function gmailComposeUrl(subject, body) {
+  return 'https://mail.google.com/mail/?view=cm&fs=1&su=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+}
+
+// Gmail로 보내기: 이미지를 저장하고 Gmail 작성창을 연다. 저장된 이미지는 클립(첨부) 버튼이나 끌어다 놓기로 붙인다.
+async function gmailHaccp() {
+  const btn = document.getElementById('hx-gmail-btn');
+  const label = btn ? btn.textContent : '';
+  // 팝업 차단을 피하려고 클릭 직후 동기적으로 창을 먼저 연다
+  const w = window.open('', '_blank');
+  if (!w) { alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용한 뒤 다시 눌러주세요.'); return; }
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = '이미지 만드는 중...'; }
+    w.document.write('<p style="font-family:sans-serif;padding:20px">이미지 만드는 중...</p>');
+    const doc = await buildHaccpDoc();
+    if (!doc) { w.close(); return; }
+    const blobs = await htmlToPngBlobs(doc.html);
+    const base = (doc.title.replace(/\s+/g, ' ') + '_' + todayStr()).replace(/[\\/:*?"<>|]/g, '_');
+    const files = blobs.map((b, i) => new File([b], base + (blobs.length > 1 ? `_${i + 1}of${blobs.length}` : '') + '.png', { type: 'image/png' }));
+    saveFilesToDisk(files);
+    const subject = doc.title.replace(/\s+/g, ' ');
+    w.location.href = gmailComposeUrl(subject, `${subject} 첨부합니다.\n\n대한가축약품`);
+    alert('이미지를 저장했습니다. Gmail 작성창에서 클립(첨부) 버튼을 눌러 저장된 이미지(' + files.length + '장)를 첨부해 보내주세요.');
+  } catch (e) {
+    w.close();
+    alert('Gmail 보내기에 실패했습니다: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
+}
+window.gmailHaccp = gmailHaccp;
+
 let haccpShareFiles = null;   // 이미지는 만들었지만 공유창 호출이 거부됐을 때 두 번째 클릭에 쓴다
 async function shareHaccp() {
   const btn = document.getElementById('hx-share-btn');
@@ -2211,15 +2311,10 @@ async function shareHaccp() {
       }
     } else {
       // 공유창 미지원: 이미지 저장 + 메일 작성창 (메일은 첨부를 자동으로 못 하므로 저장된 파일을 직접 첨부)
-      files.forEach(f => {
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(f); a.download = f.name;
-        document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-      });
+      saveFilesToDisk(files);
       haccpShareFiles = null;
-      alert('이 브라우저는 공유창을 지원하지 않아 이미지를 저장했습니다.\n메일 작성창이 열리면 저장된 이미지를 첨부해 보내주세요. 카카오톡은 휴대폰에서 이 화면을 열면 바로 공유할 수 있습니다.');
-      location.href = 'mailto:?subject=' + encodeURIComponent(title) + '&body=' + encodeURIComponent(title + ' 첨부합니다.');
+      alert('이 브라우저는 공유창을 지원하지 않아 이미지를 저장했습니다.\nGmail 작성창이 열리면 저장된 이미지를 첨부해 보내주세요. 카카오톡은 휴대폰에서 이 화면을 열면 바로 공유할 수 있습니다.');
+      window.open(gmailComposeUrl(title.replace(/\s+/g, ' '), title.replace(/\s+/g, ' ') + ' 첨부합니다.\n\n대한가축약품'), '_blank');
     }
   } catch (e) {
     haccpShareFiles = null;
