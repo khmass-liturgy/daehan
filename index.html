@@ -2051,12 +2051,27 @@ function setHaccpAll(on) {
 }
 window.setHaccpAll = setHaccpAll;
 
-function printHaccp() {
+async function printHaccp() {
   const rows = txnHaccpRows.filter(r => !txnHaccpEx.has(r));
   if (!rows.length) { alert('출력할 내역이 없습니다. 제외하지 않은 줄이 하나 이상 있어야 합니다.'); return; }
   const withPrice = !!(document.getElementById('hx-price') || {}).checked;
   const ctx = txnCtx || {};
   const single = ctx.targetCompany || '';
+  // 팝업 차단을 피하려고 클릭 직후 동기적으로 창을 먼저 연다
+  const w = window.open('', '_blank');
+  if (!w) { alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용한 뒤 다시 눌러주세요.'); return; }
+  // 제목: 농장명(이름) 거래내역 — 이름은 거래처 마스터의 담당자 이름 (거래처 한 곳일 때만)
+  let who = '';
+  if (single) {
+    who = single;
+    try {
+      const cust = await fsAll('거래처');
+      const d = cust.docs.find(x => x.data().회사 === single);
+      const nm = d ? (d.data().이름 || '').trim() : '';
+      if (nm) who += `(${nm})`;
+    } catch (e) { console.error(e); }
+  }
+  const title = (who ? who + ' ' : '') + '거래내역';
   const period = (ctx.from || ctx.to) ? `${ctx.from || '처음'} ~ ${ctx.to || '끝'}` : '';
   const th = ['날짜'].concat(single ? [] : ['거래처'], ['품명', '단위', '수량'], withPrice ? ['단가', '금액'] : [], ['비고']);
   const body = rows.map(r => {
@@ -2070,7 +2085,7 @@ function printHaccp() {
       `<td>${bigo}</td></tr>`;
   }).join('');
   const sum = withPrice ? rows.reduce((a, r) => a + (+r.공급가액 || 0), 0) : 0;
-  const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>HACCP 거래내역</title><style>
+  const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${esc(title)}</title><style>
   @page { size: A4; margin: 14mm 12mm; }
   body { font-family: 'Malgun Gothic','Apple SD Gothic Neo',sans-serif; color:#111; font-size:12px; margin:0; }
   h1 { font-size:20px; margin:0 0 4px; }
@@ -2083,13 +2098,11 @@ function printHaccp() {
   .n { text-align:right; white-space:nowrap; }
   .tot { margin-top:12px; text-align:right; font-size:13px; }
 </style></head><body>
-  <h1>HACCP 거래내역</h1>
-  <div class="meta">${single ? esc(single) + ' · ' : ''}${period ? esc(period) + ' · ' : ''}출력일 ${todayStr()} · ${rows.length}건</div>
+  <h1>${esc(title)}</h1>
+  <div class="meta">${period ? esc(period) + ' · ' : ''}출력일 ${todayStr()} · ${rows.length}건</div>
   <table><thead><tr>${th.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>
   ${withPrice ? `<div class="tot">공급가액 합계 <b>${fmtNum(sum)}원</b></div>` : ''}
 </body></html>`;
-  const w = window.open('', '_blank');
-  if (!w) { alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용한 뒤 다시 눌러주세요.'); return; }
   w.document.open(); w.document.write(html); w.document.close();
   w.focus();
   setTimeout(() => w.print(), 300);
