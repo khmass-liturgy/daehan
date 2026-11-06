@@ -2329,7 +2329,9 @@ async function kakaoSendHaccp() {
     ]);
     const img = up.infos.original, cv = upCover.infos.original;
     // 카카오는 카드 링크를 앱에 등록한 도메인만 허용한다 → 카카오 이미지 주소 대신 우리 사이트의 보기 페이지로 연결
-    const viewUrl = new URL('view.html', location.href).href + '?img=' + encodeURIComponent(img.url);
+    // 카카오가 돌려주는 이미지 주소는 http:// 라서 https로 바꿔 넘긴다 (https 페이지에서 http 이미지는 막힐 수 있음)
+    const imgUrl = String(img.url).replace(/^http:\/\//i, 'https://');
+    const viewUrl = new URL('view.html', location.href).href + '?img=' + encodeURIComponent(imgUrl);
     Kakao.Share.sendDefault({
       objectType: 'feed',
       content: {
