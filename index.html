@@ -2328,15 +2328,17 @@ async function kakaoSendHaccp() {
       Kakao.Share.uploadImage({ file: [new File([cover], 'cover.png', { type: 'image/png' })] })
     ]);
     const img = up.infos.original, cv = upCover.infos.original;
+    // 카카오는 카드 링크를 앱에 등록한 도메인만 허용한다 → 카카오 이미지 주소 대신 우리 사이트의 보기 페이지로 연결
+    const viewUrl = new URL('view.html', location.href).href + '?img=' + encodeURIComponent(img.url);
     Kakao.Share.sendDefault({
       objectType: 'feed',
       content: {
         title,
         description: `${sub} · 대한가축약품`,
         imageUrl: cv.url, imageWidth: cv.width, imageHeight: cv.height,
-        link: { mobileWebUrl: img.url, webUrl: img.url }
+        link: { mobileWebUrl: viewUrl, webUrl: viewUrl }
       },
-      buttons: [{ title: '거래내역 크게 보기', link: { mobileWebUrl: img.url, webUrl: img.url } }]
+      buttons: [{ title: '거래내역 크게 보기', link: { mobileWebUrl: viewUrl, webUrl: viewUrl } }]
     });
   } catch (e) {
     alert('카카오톡 전송에 실패했습니다: ' + (e && e.message ? e.message : JSON.stringify(e)));

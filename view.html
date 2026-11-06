@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=5, user-scalable=yes">
+<title>거래내역</title>
+<style>
+  html,body{margin:0;background:#fff;color:#111;font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif}
+  .bar{position:sticky;top:0;background:#1d4ed8;color:#fff;padding:10px 14px;font-size:15px;display:flex;justify-content:space-between;align-items:center;z-index:2}
+  .bar a{color:#fff;font-size:13px}
+  img{display:block;width:100%;height:auto}
+  .msg{padding:40px 20px;text-align:center;color:#666}
+</style>
+</head>
+<body>
+<div class="bar"><span>대한가축약품 거래내역</span><a id="orig" href="#" target="_blank" rel="noopener">원본 열기</a></div>
+<div id="box"><p class="msg">불러오는 중...</p></div>
+<script>
+(function () {
+  var box = document.getElementById('box');
+  var raw = new URLSearchParams(location.search).get('img') || '';
+  var ok = false;
+  try {
+    var u = new URL(raw);
+    // 카카오 서버에 올린 이미지만 표시한다
+    ok = u.protocol === 'https:' && /(^|\.)(kakaocdn\.net|kakao\.com)$/.test(u.hostname);
+  } catch (e) {}
+  if (!ok) { box.innerHTML = '<p class="msg">이미지 주소가 올바르지 않습니다.</p>'; return; }
+  var im = new Image();
+  im.alt = '거래내역';
+  im.onload = function () { box.innerHTML = ''; box.appendChild(im); };
+  im.onerror = function () { box.innerHTML = '<p class="msg">이미지를 불러오지 못했습니다. 보낸 지 오래되어 만료되었을 수 있습니다.</p>'; };
+  im.src = raw;
+  document.getElementById('orig').href = raw;
+})();
+</script>
+</body>
+</html>
