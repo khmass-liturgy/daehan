@@ -2278,6 +2278,34 @@ function loadKakaoSdk() {
   });
 }
 
+// 카카오 카드용 표지 이미지 (큰 글씨, 800x400)
+function makeKakaoCover(title, sub) {
+  const c = document.createElement('canvas');
+  c.width = 800; c.height = 400;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 800, 400);
+  grad.addColorStop(0, '#1d4ed8'); grad.addColorStop(1, '#0f766e');
+  g.fillStyle = grad; g.fillRect(0, 0, 800, 400);
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  const font = '"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",sans-serif';
+  g.font = `600 30px ${font}`; g.globalAlpha = .85;
+  g.fillText('대한가축약품', 400, 60);
+  g.globalAlpha = 1;
+  // 제목은 폭에 맞게 글자 크기를 줄여 한 줄(길면 두 줄)로
+  let size = 76;
+  g.font = `bold ${size}px ${font}`;
+  while (g.measureText(title).width > 720 && size > 40) { size -= 4; g.font = `bold ${size}px ${font}`; }
+  if (g.measureText(title).width > 720) {
+    const mid = Math.ceil(title.length / 2);
+    g.fillText(title.slice(0, mid), 400, 175); g.fillText(title.slice(mid), 400, 245);
+  } else g.fillText(title, 400, 200);
+  g.font = `500 44px ${font}`;
+  g.fillText(sub, 400, 300);
+  g.font = `500 28px ${font}`; g.globalAlpha = .85;
+  g.fillText('아래 버튼을 눌러 내역을 크게 보세요', 400, 355);
+  return new Promise(res => c.toBlob(res, 'image/png'));
+}
+
 // 출력물을 이미지로 만들어 카카오 서버에 올린 뒤, 카카오톡 친구·채팅방을 골라 링크 카드로 바로 보낸다.
 async function kakaoSendHaccp() {
   const btn = document.getElementById('hx-share-btn') || document.getElementById('txn-kakao-btn');
@@ -2291,17 +2319,24 @@ async function kakaoSendHaccp() {
     if (blobs.length > 1 && !confirm(`내역이 길어 이미지가 ${blobs.length}장입니다. 카카오톡 전송은 1장만 보낼 수 있습니다.\n첫 장만 보낼까요? `)) return;
     const Kakao = await loadKakaoSdk();
     const file = new File([blobs[0]], 'haccp.png', { type: 'image/png' });
-    const up = await Kakao.Share.uploadImage({ file: [file] });
-    const img = up.infos.original;
+    const title = doc.title.replace(/\s+/g, ' ');
+    const sub = `${doc.rows.length}건 · ${todayStr()}`;
+    // 긴 문서 이미지를 카드 썸네일로 쓰면 글씨가 너무 작아 안 보인다 → 큰 글씨의 표지 이미지를 카드에 쓰고, 누르면 전체 내역 이미지를 연다
+    const cover = await makeKakaoCover(title, sub);
+    const [up, upCover] = await Promise.all([
+      Kakao.Share.uploadImage({ file: [file] }),
+      Kakao.Share.uploadImage({ file: [new File([cover], 'cover.png', { type: 'image/png' })] })
+    ]);
+    const img = up.infos.original, cv = upCover.infos.original;
     Kakao.Share.sendDefault({
       objectType: 'feed',
       content: {
-        title: doc.title.replace(/\s+/g, ' '),
-        description: `${doc.rows.length}건 · ${todayStr()} · 대한가축약품`,
-        imageUrl: img.url, imageWidth: img.width, imageHeight: img.height,
+        title,
+        description: `${sub} · 대한가축약품`,
+        imageUrl: cv.url, imageWidth: cv.width, imageHeight: cv.height,
         link: { mobileWebUrl: img.url, webUrl: img.url }
       },
-      buttons: [{ title: '이미지 크게 보기', link: { mobileWebUrl: img.url, webUrl: img.url } }]
+      buttons: [{ title: '거래내역 크게 보기', link: { mobileWebUrl: img.url, webUrl: img.url } }]
     });
   } catch (e) {
     alert('카카오톡 전송에 실패했습니다: ' + (e && e.message ? e.message : JSON.stringify(e)));
