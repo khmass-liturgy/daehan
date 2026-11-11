@@ -2377,13 +2377,23 @@ async function kakaoSendTab(key) {
     alert('먼저 조회를 해주세요. 보낼 내용이 없습니다.'); return;
   }
   if (typeof html2canvas === 'undefined') { alert('이미지 모듈을 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.'); return; }
+  // 결과가 여러 줄이면 검색해서 보낼 줄을 고른다 (고르지 않은 줄은 캡처하는 동안만 숨긴다)
+  const rows = [...el.querySelectorAll('tbody tr')];
+  let hidden = [], picked = null;
+  if (rows.length > 1) {
+    picked = await pickKakaoRows(rows, cfg.name);
+    if (!picked) return;   // 취소
+    hidden = rows.filter(r => !picked.includes(r));
+  }
   try {
     if (btn) { btn.disabled = true; btn.textContent = '준비 중...'; }
+    hidden.forEach(r => { r.dataset.kkDisp = r.style.display; r.style.display = 'none'; });
     const bg = getComputedStyle(document.body).backgroundColor;
     const cssH = Math.ceil(el.scrollHeight);
     if (cssH > 30000) throw new Error('내용이 너무 깁니다. 조회 조건(상위 N개 등)을 줄여주세요.');
     const scale = cssH > 6000 ? 1 : 2;
     const canvas = await html2canvas(el, { scale, backgroundColor: bg, logging: false });
+    hidden.forEach(r => { r.style.display = r.dataset.kkDisp || ''; delete r.dataset.kkDisp; }); hidden = [];
     // 카카오톡에는 1장만 보낼 수 있으므로 너무 길면 위쪽만 보낸다
     const maxH = 6000 * scale;
     let out = canvas;
@@ -2395,14 +2405,58 @@ async function kakaoSendTab(key) {
     }
     let blob = await new Promise(res => out.toBlob(res, 'image/png'));
     if (!blob) throw new Error('이미지를 만들지 못했습니다. 조회 범위를 줄이거나 다시 시도해주세요.');
-    await kakaoSendBlob(blob, cfg.name, todayStr() + ' 조회', '내용 크게 보기');
+    await kakaoSendBlob(blob, cfg.name, (picked ? picked.length + '건 · ' : '') + todayStr() + ' 조회', '내용 크게 보기');
   } catch (e) {
     alert('카카오톡 전송에 실패했습니다: ' + (e && e.message ? e.message : JSON.stringify(e)));
   } finally {
+    hidden.forEach(r => { r.style.display = r.dataset.kkDisp || ''; delete r.dataset.kkDisp; });
     if (btn) { btn.disabled = false; btn.textContent = label; }
   }
 }
 window.kakaoSendTab = kakaoSendTab;
+
+// 보낼 줄 고르기: 검색으로 좁혀 체크하고 보낸다. 선택한 줄의 배열(취소하면 null)을 돌려준다.
+function pickKakaoRows(rows, title) {
+  return new Promise(resolve => {
+    const labels = rows.map(r => [...r.children].map(c => c.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean).join(' · '));
+    const checked = rows.map(() => true);
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:12px';
+    ov.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border2);border-radius:14px;width:min(560px,100%);max-height:90vh;display:flex;flex-direction:column;padding:16px">
+      <div style="font-weight:700;font-size:16px;margin-bottom:10px">${esc(title)} — 보낼 항목 선택</div>
+      <input class="search-input" id="kk-q" placeholder="검색해서 항목 찾기..." style="width:100%;margin-bottom:8px">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+        <button class="toggle-btn" id="kk-all">보이는 항목 모두 선택</button>
+        <button class="toggle-btn" id="kk-none">보이는 항목 모두 해제</button>
+        <span id="kk-cnt" style="margin-left:auto;font-size:12px;color:var(--text2)"></span>
+      </div>
+      <div id="kk-list" style="overflow:auto;flex:1;min-height:120px;border:1px solid var(--border);border-radius:8px"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button class="toggle-btn" id="kk-cancel">취소</button>
+        <button class="search-btn" id="kk-ok" style="background:#fee500;color:#3c1e1e">선택 항목 카톡전송</button>
+      </div></div>`;
+    document.body.appendChild(ov);
+    const $ = id => ov.querySelector('#' + id);
+    const list = $('kk-list');
+    list.innerHTML = labels.map((l, i) => `<label data-i="${i}" style="display:flex;gap:10px;align-items:flex-start;padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px"><input type="checkbox" data-i="${i}" checked style="margin-top:2px"><span>${esc(l)}</span></label>`).join('');
+    const visible = () => [...list.children].filter(n => n.style.display !== 'none').map(n => +n.dataset.i);
+    const count = () => { const n = checked.filter(Boolean).length; $('kk-cnt').textContent = `선택 ${n} / 전체 ${rows.length}`; $('kk-ok').disabled = !n; };
+    const sync = () => list.querySelectorAll('input').forEach(c => { c.checked = checked[+c.dataset.i]; });
+    list.addEventListener('change', e => { if (e.target.dataset.i != null) { checked[+e.target.dataset.i] = e.target.checked; count(); } });
+    $('kk-q').addEventListener('input', e => {
+      const q = e.target.value.trim().toLowerCase();
+      [...list.children].forEach(n => { n.style.display = !q || labels[+n.dataset.i].toLowerCase().includes(q) ? '' : 'none'; });
+    });
+    $('kk-all').onclick = () => { visible().forEach(i => checked[i] = true); sync(); count(); };
+    $('kk-none').onclick = () => { visible().forEach(i => checked[i] = false); sync(); count(); };
+    const close = v => { ov.remove(); resolve(v); };
+    $('kk-cancel').onclick = () => close(null);
+    ov.addEventListener('click', e => { if (e.target === ov) close(null); });
+    $('kk-ok').onclick = () => close(rows.filter((r, i) => checked[i]));
+    count();
+    $('kk-q').focus();
+  });
+}
 
 // 거래내역을 뺀 각 메뉴의 첫 검색줄 끝에 카톡전송 버튼을 붙인다
 (function addKakaoTabButtons() {
