@@ -2317,31 +2317,7 @@ async function kakaoSendHaccp() {
     if (!doc) return;
     const blobs = await htmlToPngBlobs(doc.html);
     if (blobs.length > 1 && !confirm(`내역이 길어 이미지가 ${blobs.length}장입니다. 카카오톡 전송은 1장만 보낼 수 있습니다.\n첫 장만 보낼까요? `)) return;
-    const Kakao = await loadKakaoSdk();
-    const file = new File([blobs[0]], 'haccp.png', { type: 'image/png' });
-    const title = doc.title.replace(/\s+/g, ' ');
-    const sub = `${doc.rows.length}건 · ${todayStr()}`;
-    // 긴 문서 이미지를 카드 썸네일로 쓰면 글씨가 너무 작아 안 보인다 → 큰 글씨의 표지 이미지를 카드에 쓰고, 누르면 전체 내역 이미지를 연다
-    const cover = await makeKakaoCover(title, sub);
-    const [up, upCover] = await Promise.all([
-      Kakao.Share.uploadImage({ file: [file] }),
-      Kakao.Share.uploadImage({ file: [new File([cover], 'cover.png', { type: 'image/png' })] })
-    ]);
-    const img = up.infos.original, cv = upCover.infos.original;
-    // 카카오는 카드 링크를 앱에 등록한 도메인만 허용한다 → 카카오 이미지 주소 대신 우리 사이트의 보기 페이지로 연결
-    // 카카오가 돌려주는 이미지 주소는 http:// 라서 https로 바꿔 넘긴다 (https 페이지에서 http 이미지는 막힐 수 있음)
-    const imgUrl = String(img.url).replace(/^http:\/\//i, 'https://');
-    const viewUrl = new URL('view.html', location.href).href + '?img=' + encodeURIComponent(imgUrl);
-    Kakao.Share.sendDefault({
-      objectType: 'feed',
-      content: {
-        title,
-        description: `${sub} · 대한가축약품`,
-        imageUrl: cv.url, imageWidth: cv.width, imageHeight: cv.height,
-        link: { mobileWebUrl: viewUrl, webUrl: viewUrl }
-      },
-      buttons: [{ title: '거래내역 크게 보기', link: { mobileWebUrl: viewUrl, webUrl: viewUrl } }]
-    });
+    await kakaoSendBlob(blobs[0], doc.title.replace(/\s+/g, ' '), `${doc.rows.length}건 · ${todayStr()}`, '거래내역 크게 보기');
   } catch (e) {
     alert('카카오톡 전송에 실패했습니다: ' + (e && e.message ? e.message : JSON.stringify(e)));
   } finally {
@@ -2349,6 +2325,100 @@ async function kakaoSendHaccp() {
   }
 }
 window.kakaoSendHaccp = kakaoSendHaccp;
+
+// 이미지 1장을 카카오 서버에 올리고, 큰 글씨 표지 카드로 친구·채팅방에 보낸다 (카드를 누르면 view.html에서 이미지를 크게 보여줌)
+async function kakaoSendBlob(blob, title, sub, btnTitle) {
+  const Kakao = await loadKakaoSdk();
+  const file = new File([blob], 'kakao.png', { type: 'image/png' });
+  // 긴 문서 이미지를 카드 썸네일로 쓰면 글씨가 너무 작아 안 보인다 → 큰 글씨의 표지 이미지를 카드에 쓰고, 누르면 전체 이미지를 연다
+  const cover = await makeKakaoCover(title, sub);
+  const [up, upCover] = await Promise.all([
+    Kakao.Share.uploadImage({ file: [file] }),
+    Kakao.Share.uploadImage({ file: [new File([cover], 'cover.png', { type: 'image/png' })] })
+  ]);
+  const img = up.infos.original, cv = upCover.infos.original;
+  // 카카오는 카드 링크를 앱에 등록한 도메인만 허용한다 → 카카오 이미지 주소 대신 우리 사이트의 보기 페이지로 연결
+  // 카카오가 돌려주는 이미지 주소는 http:// 라서 https로 바꿔 넘긴다 (https 페이지에서 http 이미지는 막힐 수 있음)
+  const imgUrl = String(img.url).replace(/^http:\/\//i, 'https://');
+  const viewUrl = new URL('view.html', location.href).href + '?img=' + encodeURIComponent(imgUrl);
+  Kakao.Share.sendDefault({
+    objectType: 'feed',
+    content: {
+      title,
+      description: `${sub} · 대한가축약품`,
+      imageUrl: cv.url, imageWidth: cv.width, imageHeight: cv.height,
+      link: { mobileWebUrl: viewUrl, webUrl: viewUrl }
+    },
+    buttons: [{ title: btnTitle, link: { mobileWebUrl: viewUrl, webUrl: viewUrl } }]
+  });
+}
+
+// ── 각 메뉴의 '카톡전송' 버튼: 지금 화면에 보이는 조회 결과를 이미지로 캡처해 보낸다 ──
+const KAKAO_TABS = {
+  stock:     { name: '제품정보',     result: () => 'stock-result' },
+  balance:   { name: '거래처 잔액',  result: () => 'balance-result' },
+  salesrank: { name: '매출 순위',    result: () => 'salesrank-result' },
+  panal:     { name: '제품분석',     result: () => {
+    const v = ['item', 'cm', 'mg'].find(k => document.getElementById('pa-view-' + k).style.display !== 'none') || 'item';
+    return { item: 'panal-result', cm: 'cm-result', mg: 'mg-result' }[v];
+  } },
+  inactive:  { name: '미거래 관리',  result: () => 'inactive-result' },
+  info:      { name: '거래처 정보',  result: () => 'info-result' },
+  qia:       { name: '동물약품 검색', result: () => 'qia-result' },
+  wd:        { name: '휴약기간',     result: () => 'wd-result' }
+};
+
+async function kakaoSendTab(key) {
+  const cfg = KAKAO_TABS[key];
+  const btn = document.getElementById('kakao-tab-btn-' + key);
+  const label = btn ? btn.textContent : '';
+  const el = document.getElementById(cfg.result());
+  if (!el || !el.children.length || (el.querySelector('.empty, .loading') && !el.querySelector('table'))) {
+    alert('먼저 조회를 해주세요. 보낼 내용이 없습니다.'); return;
+  }
+  if (typeof html2canvas === 'undefined') { alert('이미지 모듈을 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.'); return; }
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = '준비 중...'; }
+    const bg = getComputedStyle(document.body).backgroundColor;
+    const cssH = Math.ceil(el.scrollHeight);
+    if (cssH > 30000) throw new Error('내용이 너무 깁니다. 조회 조건(상위 N개 등)을 줄여주세요.');
+    const scale = cssH > 6000 ? 1 : 2;
+    const canvas = await html2canvas(el, { scale, backgroundColor: bg, logging: false });
+    // 카카오톡에는 1장만 보낼 수 있으므로 너무 길면 위쪽만 보낸다
+    const maxH = 6000 * scale;
+    let out = canvas;
+    if (canvas.height > maxH * 1.3) {
+      if (!confirm('내용이 길어 위쪽 일부만 보낼 수 있습니다. 위쪽만 보낼까요?\n(조회 조건을 줄이면 전체를 보낼 수 있습니다)')) return;
+      out = document.createElement('canvas');
+      out.width = canvas.width; out.height = maxH;
+      out.getContext('2d').drawImage(canvas, 0, 0, canvas.width, maxH, 0, 0, canvas.width, maxH);
+    }
+    let blob = await new Promise(res => out.toBlob(res, 'image/png'));
+    if (!blob) throw new Error('이미지를 만들지 못했습니다. 조회 범위를 줄이거나 다시 시도해주세요.');
+    await kakaoSendBlob(blob, cfg.name, todayStr() + ' 조회', '내용 크게 보기');
+  } catch (e) {
+    alert('카카오톡 전송에 실패했습니다: ' + (e && e.message ? e.message : JSON.stringify(e)));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
+}
+window.kakaoSendTab = kakaoSendTab;
+
+// 거래내역을 뺀 각 메뉴의 첫 검색줄 끝에 카톡전송 버튼을 붙인다
+(function addKakaoTabButtons() {
+  Object.keys(KAKAO_TABS).forEach(key => {
+    const row = document.querySelector('#tab-' + key + ' .search-row');
+    if (!row) return;
+    const b = document.createElement('button');
+    b.className = 'search-btn';
+    b.id = 'kakao-tab-btn-' + key;
+    b.style.cssText = 'background:#fee500;color:#3c1e1e;margin-left:auto';
+    b.title = '지금 화면의 조회 결과를 이미지로 만들어 카카오톡 친구·채팅방에 바로 보냅니다';
+    b.textContent = '카톡전송';
+    b.onclick = () => kakaoSendTab(key);
+    row.appendChild(b);
+  });
+})();
 
 // 거래내역 탭 첫 진입시 자동 표시: 당일 매출 기준, 당일 데이터가 아직 없으면 최근 매출일로 대체
 async function autoLoadTodayTxn() {
