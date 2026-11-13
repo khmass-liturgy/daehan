@@ -258,6 +258,7 @@ th.bigo{min-width:110px}
     </div>
 
     <div id="tab-balance" style="display:none">
+      <div id="bal-period"></div>
       <div class="search-row">
         <input class="search-input" id="bal-q" placeholder="거래처명 검색..." onkeydown="if(event.key==='Enter')searchBalance()">
         <button class="toggle-btn" id="bal-unpaid-btn" onclick="toggleUnpaid()">미수금만</button>
@@ -267,6 +268,7 @@ th.bigo{min-width:110px}
     </div>
 
     <div id="tab-salesrank" style="display:none">
+      <div id="sr-period"></div>
       <div class="search-row">
         <button class="toggle-btn on" id="sr-view-cust" onclick="setSrView('cust')">거래처별</button>
         <button class="toggle-btn" id="sr-view-mfg" onclick="setSrView('mfg')">제조사별</button>
@@ -292,6 +294,7 @@ th.bigo{min-width:110px}
     </div>
 
     <div id="tab-panal" style="display:none">
+      <div id="pa-period"></div>
       <div class="search-row">
         <button class="toggle-btn on" id="pa-view-btn-item" onclick="setPaView('item')">품목별 순위</button>
         <button class="toggle-btn" id="pa-view-btn-cm" onclick="setPaView('cm')">거래처×제조사 순위 <span class="new-badge">NEW</span></button>
@@ -538,7 +541,92 @@ function aggregateSalesRows(rows) {
   }
   return [...byCo].map(([회사, m]) => ({ 회사, 품목: [...m.values()] }));
 }
-async function loadCompanyItems() {
+// ── 기간 조회 (거래처 잔액 / 매출 순위 / 제품분석) ───────────────
+// 기간을 비워 두면 예전처럼 미리 집계된 데이터(최근 2년·전체 기간)를 쓰고,
+// 기간을 지정하면 그 기간의 전표(전표_세부 매출 / 전표_묶음 수금)를 읽어 다시 집계한다.
+const PERIOD_ROW_CAP = 20000;
+let periodCapped = false;   // 마지막 기간 조회가 건수 한도에 걸렸는지
+function ymd(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function periodBarHtml(k) {
+  const b = (key, label) => `<button class="toggle-btn" onclick="setPeriodPreset('${k}','${key}')">${label}</button>`;
+  return `<div class="search-row" style="align-items:center">
+    <span style="font-size:12px;color:var(--text2)">📅 기간</span>
+    <input type="date" class="search-input" id="${k}-from" style="flex:0 0 auto" onchange="applyPeriod('${k}')">
+    <span style="color:var(--text3)">~</span>
+    <input type="date" class="search-input" id="${k}-to" style="flex:0 0 auto" onchange="applyPeriod('${k}')">
+    ${b('month','이번 달')}${b('lastmonth','지난 달')}${b('3m','최근 3개월')}${b('year','올해')}${b('all','전체')}
+  </div>`;
+}
+// 현재 지정된 기간 → {from,to} (둘 다 비었으면 null)
+function getPeriod(k) {
+  const from = document.getElementById(k+'-from').value, to = document.getElementById(k+'-to').value;
+  return (from || to) ? { from, to } : null;
+}
+function periodNote(k) {
+  const p = getPeriod(k);
+  if (!p) return '';
+  const warn = periodCapped ? ' · <span style="color:var(--amber)">⚠ 전표가 너무 많아 일부만 반영됨 — 기간을 줄여 주세요</span>' : '';
+  return `<div style="font-size:11px;color:var(--blue);margin-bottom:8px">📅 ${esc(p.from||'처음')} ~ ${esc(p.to||'오늘')} 기간 기준${warn}</div>`;
+}
+function setPeriodPreset(k, preset) {
+  const now = new Date(), y = now.getFullYear(), m = now.getMonth();
+  let from = '', to = '';
+  if (preset === 'month') { from = ymd(new Date(y, m, 1)); to = ymd(now); }
+  else if (preset === 'lastmonth') { from = ymd(new Date(y, m - 1, 1)); to = ymd(new Date(y, m, 0)); }
+  else if (preset === '3m') { from = ymd(new Date(y, m - 3, now.getDate())); to = ymd(now); }
+  else if (preset === 'year') { from = ymd(new Date(y, 0, 1)); to = ymd(now); }
+  document.getElementById(k+'-from').value = from;
+  document.getElementById(k+'-to').value = to;
+  applyPeriod(k);
+}
+function applyPeriod(k) {
+  const p = getPeriod(k);
+  const out = { bal:'balance-result', sr:'salesrank-result', pa:'panal-result' }[k];
+  if (p && p.from && p.to && p.from > p.to) {
+    document.getElementById(out).innerHTML = '<div class="empty">시작일이 종료일보다 늦습니다</div>';
+    return;
+  }
+  if (k === 'bal') searchBalance();
+  else if (k === 'sr') searchSalesRank();
+  else {
+    cmLoaded = false; mgLoaded = false;
+    if (paView === 'cm') searchCompanyMfg();
+    else if (paView === 'mg') searchMargin();
+    else searchProdAnalysis();
+  }
+}
+window.setPeriodPreset = setPeriodPreset; window.applyPeriod = applyPeriod;
+['bal','sr','pa'].forEach(k => { document.getElementById(k+'-period').innerHTML = periodBarHtml(k); });
+
+// 기간 내 매출 전표 줄(전표_세부) — 같은 기간은 캐시
+async function loadSalesRows(p) {
+  const res = await fsCached(`salesRows|${p.from}|${p.to}`, async () => {
+    const { collection, query, getDocs, where, orderBy, limit } = window.fbFuncs;
+    const cs = [where('계정', '==', '매출')];
+    if (p.from) cs.push(where('날짜', '>=', p.from));
+    if (p.to) cs.push(where('날짜', '<=', p.to));
+    const snap = await getDocs(query(collection(window.fbdb, '전표_세부'), ...cs, orderBy('날짜', 'desc'), limit(PERIOD_ROW_CAP)));
+    return { rows: snap.docs.map(d => d.data()), capped: snap.size >= PERIOD_ROW_CAP };
+  });
+  periodCapped = res.capped;
+  return res.rows;
+}
+// 기간 내 수금 전표(전표_묶음 헤더)
+async function loadCashRows(p) {
+  const res = await fsCached(`cashRows|${p.from}|${p.to}`, async () => {
+    const { collection, query, getDocs, where, limit } = window.fbFuncs;
+    const cs = [];
+    if (p.from) cs.push(where('날짜', '>=', p.from));
+    if (p.to) cs.push(where('날짜', '<=', p.to));
+    const snap = await getDocs(query(collection(window.fbdb, '전표_묶음'), ...cs, limit(PERIOD_ROW_CAP)));
+    return { rows: snap.docs.map(d => d.data()).filter(r => r.계정 === '수금'), capped: snap.size >= PERIOD_ROW_CAP };
+  });
+  if (res.capped) periodCapped = true;
+  return res.rows;
+}
+
+async function loadCompanyItems(period) {
+  if (period) return aggregateSalesRows(await loadSalesRows(period));
   return fsCached('companyItems', async () => {
     let docs = [];
     try {
@@ -1202,7 +1290,7 @@ window.toggleStockOnly = toggleStockOnly;
 // ── 거래처 잔액 (잔액 컬렉션 사용 - 전체 기간 반영) ─
 let balanceItems = [];
 let balanceSort = { key: '잔액', dir: 'desc' };
-const BALANCE_SORT_TYPES = { 회사:'text', 잔액:'num', 잔액기준일:'date', 총매출:'num', 최종매출일:'date' };
+const BALANCE_SORT_TYPES = { 회사:'text', 잔액:'num', 잔액기준일:'date', 총매출:'num', 최종매출일:'date', 기간매출:'num', 기간수금:'num' };
 
 function setBalanceSort(key) {
   balanceSort = toggleSort(balanceSort, key, BALANCE_SORT_TYPES[key]);
@@ -1229,6 +1317,19 @@ async function searchBalance() {
       if (r.회사) custMap.set(r.회사, { 이름: r.이름 || '', 전화: r.전화1 || '' });
     });
 
+    // 기간을 지정하면 그 기간의 매출·수금 합계를 함께 구해, 거래가 있었던 거래처만 보여준다
+    const balPeriod = getPeriod('bal');
+    let periodSales = null, periodCash = null;
+    if (balPeriod) {
+      periodSales = new Map(); periodCash = new Map();
+      for (const r of await loadSalesRows(balPeriod)) {
+        if (r.회사) periodSales.set(r.회사, (periodSales.get(r.회사) || 0) + (+r.공급가액 || 0));
+      }
+      for (const r of await loadCashRows(balPeriod)) {
+        if (r.회사) periodCash.set(r.회사, (periodCash.get(r.회사) || 0) + (+r.입금액 || 0));
+      }
+    }
+
     let items = balSnap.docs.map(d => {
       const r = d.data();
       const info = custMap.get(r.회사) || {};
@@ -1236,8 +1337,11 @@ async function searchBalance() {
         ...r,
         이름: info.이름,
         전화: info.전화,
+        기간매출: periodSales ? (periodSales.get(r.회사) || 0) : 0,
+        기간수금: periodCash ? (periodCash.get(r.회사) || 0) : 0,
       };
     });
+    if (balPeriod) items = items.filter(r => r.기간매출 || r.기간수금);
 
     // 필터 (회사명 + 담당자 이름 검색)
     if (q) items = items.filter(r =>
@@ -1258,6 +1362,7 @@ window.searchBalance = searchBalance;
 function renderBalanceResult() {
   if (!balanceItems.length) { empty('balance-result'); return; }
   const items = sortBy(balanceItems, balanceSort, BALANCE_SORT_TYPES);
+  const hasP = !!getPeriod('bal');
 
   const rows = items.slice(0, 300).map(r => {
     const cls = r.잔액 > 0 ? 'pos' : r.잔액 < 0 ? 'neg' : 'zero';
@@ -1273,22 +1378,26 @@ function renderBalanceResult() {
         <span style="font-size:10px;color:var(--text3);margin-left:4px">🔍</span>
       </td>
       <td style="font-size:11px;color:var(--text3)">${esc(r.잔액기준일||'-')}${esc(r.잔액기준계정?' '+r.잔액기준계정:'')}</td>
-      <td class="num hide-mobile">${fmt억(r.총매출)}</td>
-      <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${esc(r.최종매출일||'')}</td>
+      ${hasP
+        ? `<td class="num">${fmt억(r.기간매출)}</td><td class="num">${fmt억(r.기간수금)}</td>`
+        : `<td class="num hide-mobile">${fmt억(r.총매출)}</td>
+      <td class="hide-mobile" style="font-size:11px;color:var(--text3)">${esc(r.최종매출일||'')}</td>`}
     </tr>`;
   }).join('');
 
   document.getElementById('balance-result').innerHTML = `
+    ${periodNote('bal')}
     <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
-      ${items.length}개 거래처 · 잔액은 최종 명세표 기준 · 헤더 클릭시 정렬 · <span style="color:var(--blue)">거래처명</span>=거래내역 · <span style="color:var(--amber)">잔액</span>=상세보기
+      ${items.length}개 거래처 · 잔액은 최종 명세표 기준(기간과 무관한 현재 잔액) · 헤더 클릭시 정렬 · <span style="color:var(--blue)">거래처명</span>=거래내역 · <span style="color:var(--amber)">잔액</span>=상세보기
     </div>
     <div class="tbl-wrap"><table>
       <thead><tr>
         ${thSort('거래처 (담당자)','회사',balanceSort,'setBalanceSort')}
         ${thSort('잔액','잔액',balanceSort,'setBalanceSort','num')}
         ${thSort('기준 전표','잔액기준일',balanceSort,'setBalanceSort')}
-        ${thSort('누적 매출','총매출',balanceSort,'setBalanceSort','num hide-mobile')}
-        ${thSort('최종거래일','최종매출일',balanceSort,'setBalanceSort','hide-mobile')}
+        ${hasP
+          ? thSort('기간 매출','기간매출',balanceSort,'setBalanceSort','num') + thSort('기간 수금','기간수금',balanceSort,'setBalanceSort','num')
+          : thSort('누적 매출','총매출',balanceSort,'setBalanceSort','num hide-mobile') + thSort('최종거래일','최종매출일',balanceSort,'setBalanceSort','hide-mobile')}
       </tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`;
@@ -2917,7 +3026,7 @@ window.setMfgSort = setMfgSort;
 async function searchMfgRank() {
   loading('salesrank-result');
   try {
-    const [companies, prodSnap] = await Promise.all([loadCompanyItems(), fsAll('제품', 2000)]);
+    const [companies, prodSnap] = await Promise.all([loadCompanyItems(getPeriod('sr')), fsAll('제품', 2000)]);
     const mfgOf = new Map();
     prodSnap.docs.forEach(d => { const r = d.data(); if (r.품명) mfgOf.set(r.품명, r.대분류 || ''); });
 
@@ -2977,6 +3086,7 @@ function renderMfgRank() {
     <div style="margin-bottom:12px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;font-size:12px">
       제조사 ${mfgRaw.length}곳 · 총 매출 <strong>${fmt억(mfgTotal)}</strong>
     </div>
+    ${periodNote('sr')}
     <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
       제조사별 매출 상위 ${items.length}곳 · 거래처별 품목 집계 기준 · 헤더 클릭시 정렬
     </div>
@@ -3017,8 +3127,22 @@ async function searchSalesRank() {
       if (r.회사) custMap.set(r.회사, { 이름: r.이름 || '', 전화: r.전화1 || '', 담당사원: r.담당사원 || '' });
     });
 
-    const 전체목록 = balSnap.docs
-      .map(d => d.data())
+    // 기간을 지정하면 누적매출 대신 그 기간의 전표로 거래처별 매출·최종매출일을 다시 집계한다
+    const srPeriod = getPeriod('sr');
+    let balRows = balSnap.docs.map(d => d.data());
+    if (srPeriod) {
+      const sales = new Map();
+      for (const r of await loadSalesRows(srPeriod)) {
+        if (!r.회사) continue;
+        const cur = sales.get(r.회사) || { 총매출: 0, 최종매출일: '' };
+        cur.총매출 += (+r.공급가액 || 0);
+        if ((r.날짜 || '') > cur.최종매출일) cur.최종매출일 = r.날짜 || '';
+        sales.set(r.회사, cur);
+      }
+      const balBy = new Map(balRows.map(r => [r.회사, r]));
+      balRows = [...sales].map(([회사, v]) => ({ ...(balBy.get(회사) || { 회사, 잔액: 0 }), ...v }));
+    }
+    const 전체목록 = balRows
       .filter(r => (r.총매출 || 0) > 0)
       .map(r => {
         const info = custMap.get(r.회사) || {};
@@ -3115,6 +3239,7 @@ function renderSalesRank() {
     <div style="margin-bottom:12px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px">
       ${srCatBadges || '<span style="color:var(--text3);font-size:11px">데이터 없음</span>'}
     </div>
+    ${periodNote('sr')}
     <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
       ${salesRankCategory === 'all' ? '전체' : salesRankCategory} · 매출 상위 ${items.length}곳 (해당 축종 ${srFilteredCount}곳 중) · 헤더 클릭시 정렬 · 축종 태그 클릭하여 지정
     </div>
@@ -3123,7 +3248,7 @@ function renderSalesRank() {
         <th>#</th>
         ${thSort('거래처 (담당자)','회사',srSort,'setSrSort')}
         ${thSort('축종','축종',srSort,'setSrSort')}
-        ${thSort('누적매출','총매출',srSort,'setSrSort','num')}
+        ${thSort(getPeriod('sr') ? '기간매출' : '누적매출','총매출',srSort,'setSrSort','num')}
         ${thSort('잔액','잔액',srSort,'setSrSort','num hide-mobile')}
         ${thSort('최종매출일','최종매출일',srSort,'setSrSort','hide-mobile')}
         <th class="hide-mobile">담당사원</th>
@@ -3169,7 +3294,7 @@ async function searchProdAnalysis() {
   try {
     await loadProductSpecies();  // 제품축종 수동 매핑 캐시 최신화
 
-    const [companies, prodSnap] = await Promise.all([loadCompanyItems(), fsAll('제품', 2000)]);
+    const [companies, prodSnap] = await Promise.all([loadCompanyItems(getPeriod('pa')), fsAll('제품', 2000)]);
 
     // 제품 정보 맵 (품명 → 제조사 / 현재재고)
     const prodInfo = new Map();
@@ -3284,8 +3409,9 @@ function renderProdAnalysis() {
       ${paCatBadges || '<span style="color:var(--text3);font-size:11px">데이터 없음</span>'}
     </div>
     ${alertBanner}
+    ${periodNote('pa')}
     <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
-      ${paSpecies === 'all' ? '전체' : paSpecies} · 매출 상위 ${paItems.length}개 (해당 축종 ${paFilteredCount}개 중) · 최근 2년 매출 기준 · 헤더 클릭시 정렬 · 품명 클릭시 구매처 전체 보기
+      ${paSpecies === 'all' ? '전체' : paSpecies} · 매출 상위 ${paItems.length}개 (해당 축종 ${paFilteredCount}개 중) · ${getPeriod('pa') ? '지정 기간' : '최근 2년'} 매출 기준 · 헤더 클릭시 정렬 · 품명 클릭시 구매처 전체 보기
     </div>
     <div class="tbl-wrap"><table>
       <thead><tr>
@@ -3333,7 +3459,7 @@ window.setCmSort = setCmSort;
 async function searchCompanyMfg() {
   loading('cm-result');
   try {
-    const [companies, prodSnap] = await Promise.all([loadCompanyItems(), fsAll('제품', 2000)]);
+    const [companies, prodSnap] = await Promise.all([loadCompanyItems(getPeriod('pa')), fsAll('제품', 2000)]);
     const mfgOf = new Map();
     prodSnap.docs.forEach(d => { const r = d.data(); if (r.품명) mfgOf.set(r.품명, r.대분류 || ''); });
 
@@ -3398,8 +3524,9 @@ function renderCompanyMfg() {
   }).join('');
 
   document.getElementById('cm-result').innerHTML = `
+    ${periodNote('pa')}
     <div style="font-size:11px;color:var(--text3);margin-bottom:8px">
-      ${mfg ? esc(mfg) : '전체 제조사'} · 거래처×제조사 ${cmItems.length}개 표시 (조건에 맞는 ${filtered.length}개 중, 합계 ${fmt억(total)}) · 최근 2년 매출 기준 · 헤더 클릭시 정렬 · 대표품목 = 해당 조합에서 매출이 가장 큰 품목
+      ${mfg ? esc(mfg) : '전체 제조사'} · 거래처×제조사 ${cmItems.length}개 표시 (조건에 맞는 ${filtered.length}개 중, 합계 ${fmt억(total)}) · ${getPeriod('pa') ? '지정 기간' : '최근 2년'} 매출 기준 · 헤더 클릭시 정렬 · 대표품목 = 해당 조합에서 매출이 가장 큰 품목
     </div>
     <div class="tbl-wrap"><table>
       <thead><tr>
@@ -3436,7 +3563,7 @@ async function searchMargin() {
   loading('mg-result');
   try {
     await loadProductSpecies();
-    const [companies, prodSnap] = await Promise.all([loadCompanyItems(), fsAll('제품', 2000)]);
+    const [companies, prodSnap] = await Promise.all([loadCompanyItems(getPeriod('pa')), fsAll('제품', 2000)]);
     const prodInfo = new Map();
     prodSnap.docs.forEach(d => { const r = d.data(); if (r.품명) prodInfo.set(r.품명, { 대분류: r.대분류 || '', 구매단가: +r.구매최종단가 || 0 }); });
 
@@ -3522,6 +3649,7 @@ function renderMargin() {
     ? `<div style="font-size:11px;color:var(--text3);margin-top:10px">구매단가가 없어 계산에서 제외된 품목 ${mgNoCost.length}개 (매출 ${fmt억(mgNoCost.reduce((s, r) => s + r.매출금액, 0))}): ${mgNoCost.slice(0, 8).map(r => esc(r.품명)).join(' · ')}${mgNoCost.length > 8 ? ' …' : ''}</div>` : '';
 
   document.getElementById('mg-result').innerHTML = `
+    ${periodNote('pa')}
     <div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:12px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;font-size:12px">
       <span>매출 <strong>${fmt억(sum.매출)}</strong></span>
       <span>추정 원가 <strong>${fmt억(sum.원가)}</strong></span>
