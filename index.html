@@ -796,6 +796,7 @@ window.closeUploadDetail = closeUploadDetail;
 
 // ── 탭 ───────────────────────────────────────────
 function showTab(name) {
+  if (window.hiddenTabs && window.hiddenTabs.has(name)) name = 'stock';   // 이 계정에 숨긴 메뉴
   ['stock','balance','salesrank','panal','txn','inactive','info','qia','wd'].forEach(t => {
     document.getElementById('tab-'+t).style.display = t === name ? '' : 'none';
   });

@@ -41,8 +41,10 @@ async function setup(options = {}) {
     signInWithPopup: async () => { calls.popup++; if (options.popupError) throw { code: options.popupError }; },
     signOut: async () => { calls.signedOut++; await listener(null); }
   };
+  // 메뉴 숨김 검사용 가짜 탭 (nav .nav-tab)
+  const navTabs = ['stock', 'inactive', 'info'].map(t => ({ style: {}, getAttribute: () => `showTab('${t}')`, tab: t }));
   const context = vm.createContext({
-    document: { getElementById: getElement },
+    document: { getElementById: getElement, querySelectorAll: () => navTabs },
     window: {
       startApp: () => { calls.started++; },
       location: { reload: () => { calls.reloaded++; } },
@@ -63,7 +65,7 @@ async function setup(options = {}) {
   script.runInContext(context);
   await new Promise(resolve => setImmediate(resolve));
   return {
-    calls, getElement, emit: value => listener(value),
+    calls, getElement, navTabs, window: context.window, emit: value => listener(value),
     visible: () => getElement('app').classList.values.has('show'),
     click: id => getElement(id).listeners.click()
   };
@@ -90,6 +92,22 @@ test('approved Google employee can enter', async () => {
   assert.equal(h.calls.started, 1);
   assert.equal(h.visible(), true);
   assert.equal(h.calls.signedOut, 0);
+});
+
+test('hyb0215@naver.com can enter but the 미거래 관리 menu is hidden', async () => {
+  const h = await setup();
+  await h.emit(user({ ...owner, email: 'hyb0215@naver.com' }));
+  assert.equal(h.calls.started, 1);
+  assert.equal(h.visible(), true);
+  assert.deepEqual(h.navTabs.filter(t => t.style.display === 'none').map(t => t.tab), ['inactive']);
+  assert.equal(h.window.hiddenTabs.has('inactive'), true);
+});
+
+test('other accounts still see every menu', async () => {
+  const h = await setup();
+  await h.emit(user(owner));
+  assert.equal(h.navTabs.some(t => t.style.display === 'none'), false);
+  assert.equal(h.window.hiddenTabs.size, 0);
 });
 
 for (const [name, claims] of [

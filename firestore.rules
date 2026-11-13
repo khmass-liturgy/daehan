@@ -3,7 +3,7 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function isAuthorizedEditor() {
       return request.auth != null
-        && request.auth.token.email in ['trsumun@gmail.com', 'jinhee4ys@gmail.com', 'daehan2372@gmail.com']
+        && request.auth.token.email in ['trsumun@gmail.com', 'jinhee4ys@gmail.com', 'daehan2372@gmail.com', 'hyb0215@naver.com']
         && request.auth.token.email_verified == true
         && request.auth.token.firebase.sign_in_provider == 'google.com';
     }

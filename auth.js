@@ -1,5 +1,16 @@
 // UI checks are for usability. firestore.rules enforces access on the server.
-const ALLOWED_EMAILS = ['trsumun@gmail.com', 'jinhee4ys@gmail.com', 'daehan2372@gmail.com'];
+const ALLOWED_EMAILS = ['trsumun@gmail.com', 'jinhee4ys@gmail.com', 'daehan2372@gmail.com', 'hyb0215@naver.com'];
+// 계정별로 숨길 메뉴 (화면 표시용 — 데이터 접근 권한은 firestore.rules가 정한다)
+const HIDDEN_TABS = { 'hyb0215@naver.com': ['inactive'] };
+
+function applyMenuRestrictions(email) {
+  const hidden = HIDDEN_TABS[email] || [];
+  window.hiddenTabs = new Set(hidden);
+  document.querySelectorAll('nav .nav-tab').forEach(el => {
+    const m = /showTab\('([^']+)'\)/.exec(el.getAttribute('onclick') || '');
+    el.style.display = m && window.hiddenTabs.has(m[1]) ? 'none' : '';
+  });
+}
 const loginButton = document.getElementById('google-login-btn');
 const logoutButton = document.getElementById('logout-btn');
 const message = document.getElementById('login-err');
@@ -70,6 +81,7 @@ async function initializeLogin() {
         return;
       }
       message.textContent = '';
+      applyMenuRestrictions(claims.email);
       window.loginEmail = claims.email;   // Gmail 보내기가 같은 계정으로 열리도록 index.html에서 사용
       document.getElementById('login-screen').classList.add('hide');
       document.getElementById('app').classList.add('show');
