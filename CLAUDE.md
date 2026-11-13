@@ -6,6 +6,15 @@ Firebase 프로젝트: `daehan-adb1d`. Google 로그인(`auth.js`)을 사용하�
 `firestore.rules`는 GitHub Pages push만으로 Firebase에 적용되지 않는다. Firebase 콘솔에서 별도로 게시해야 한다.
 로그인 변경 후 로컬 사본을 동기화할 때는 `index.html`과 `auth.js`를 함께 복사한다.
 
+## 업체별 제품정보 (`vendor-products.json`)
+
+"업체별 제품정보" 탭은 Firestore `제품`(대분류=제조사) 중 8개 업체(한국썸벳·코미팜·고려BNP·중앙백신·MSD·베링거·SF·다원케미칼) 품목을 골라,
+업체 홈페이지에서 정리해 둔 `vendor-products.json`과 품명으로 맞춰 양돈/양계/축우/공통으로 보여준다(`index.html`의 `VENDORS`, `vdMatch`).
+- `vendor-products.json`은 `{ 업체id: [{n 제품명, c 분류, sp 축종[], t 사용축종, f 특장점, i 성분, e 효능, d 용법, p 포장, w 휴약, k 검색어, u 링크, img}] }` 형식의 정적 파일이다. 로컬 사본 동기화 때 `index.html`과 함께 복사한다.
+- 홈페이지 자료가 들어 있는 업체: 한국썸벧(thumbvet.com), 고려비엔피(kbnp.co.kr), 중앙백신(cavac.co.kr), MSD(msd-animal-health.co.kr). 2026-11-13 수집.
+- 코미팜·베링거·SF(esef.co.kr)·다원케미칼(daonechem.com)은 사이트 쪽 차단/인증서 문제로 자동 수집이 안 돼 비어 있다. 이 업체들은 취급 품목만 보여주고 QIA 허가정보 검색으로 연결한다. 자료를 넣으려면 같은 형식으로 해당 업체id(`komipharm`,`bi`,`sf`,`dawon`) 배열을 채우면 된다.
+- 축종은 `제품축종`(수동 지정) > 홈페이지 분류 > 품명 자동분류 순으로 정한다.
+
 ## 커밋/푸시 워크플로우 (자동, 확인 불필요)
 
 기능 추가·수정 작업을 완료하고 브라우저에서 동작 확인까지 마쳤다면, "커밋할까요?" 라고 묻지 말고

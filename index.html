@@ -118,7 +118,32 @@ tr:hover td{background:var(--bg3)}
 @media(max-width:600px){.hide-mobile{display:none}}
 /* ── 새 메뉴 안내 줄 ── */
 .new-notice{display:flex;align-items:flex-start;gap:10px;padding:8px 16px;background:#16233d;border-bottom:1px solid var(--border2);font-size:12px;line-height:1.55;color:var(--text)}
+.vd-note{font-size:11px;color:var(--text3);margin-bottom:14px;line-height:1.6}
+.vd-note a{color:var(--blue)}
+.vd-warn{background:var(--bg2);border:1px solid var(--border2);border-left:3px solid var(--amber);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--text2);margin-bottom:14px;line-height:1.6}
+.vd-warn a{color:var(--blue)}
+.vd-sec{display:flex;align-items:center;gap:8px;margin:20px 0 10px;font-size:15px;font-weight:700}
+.vd-sec:first-child{margin-top:0}
+.vd-sec .cnt{font-size:11px;font-weight:600;color:var(--text3)}
+.vd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.vd-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;min-width:0}
+.vd-head{display:flex;gap:10px;align-items:flex-start}
+.vd-head img{width:56px;height:56px;object-fit:contain;border-radius:8px;background:#fff;flex:none}
+.vd-name{font-size:14px;font-weight:700;color:var(--text);word-break:keep-all;overflow-wrap:anywhere}
+.vd-sub{font-size:11px;color:var(--text3);margin-top:3px;word-break:keep-all;overflow-wrap:anywhere}
+.vd-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.vd-tag{font-size:10px;padding:2px 7px;border-radius:8px;background:var(--bg3);color:var(--text2);font-weight:600;white-space:nowrap}
+.vd-sum{font-size:12px;color:var(--text2);margin-top:8px;line-height:1.55;white-space:pre-line;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.vd-card details{margin-top:8px}
+.vd-card summary{font-size:11px;color:var(--blue);cursor:pointer;user-select:none}
+.vd-card dt{font-size:11px;font-weight:700;color:var(--teal);margin-top:10px}
+.vd-card dd{font-size:12px;color:var(--text2);line-height:1.6;white-space:pre-line;overflow-wrap:anywhere;margin-top:2px}
+.vd-links{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:11px}
+.vd-links a{color:var(--blue);cursor:pointer;text-decoration:none}
+.vd-none{font-size:11px;color:var(--text3);margin-top:8px}
+@media (max-width:600px){.vd-grid{grid-template-columns:1fr}}
 .new-badge{display:inline-block;background:var(--blue);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;letter-spacing:.3px;flex:none;line-height:1.5}
+.nav-tab.active .new-badge{background:#fff;color:var(--blue)}
 .new-text{flex:1}
 .new-text b{color:var(--blue)}
 .new-text b[onclick]{cursor:pointer;text-decoration:underline;text-underline-offset:2px}
@@ -214,12 +239,13 @@ th.bigo{min-width:110px}
 
   <div class="new-notice" id="new-menu-notice" style="display:none">
     <span class="new-badge">NEW</span>
-    <span class="new-text" title="아래 굵은 글씨를 누르면 바로 이동합니다"><b onclick="openNewMenu('cm')">제품분석 ▸ 거래처×제조사 순위</b>: 거래처별로 제조사 단위 매출 순위를 보고, 각 조합에서 매출이 가장 큰 <b>대표품목</b>을 확인합니다. · <b onclick="openNewMenu('mg')">제품분석 ▸ 이익률 분석</b>: 품목별 추정 원가(판매수량×구매단가)·이익·이익률을 보고 이익률이 낮은 품목을 찾습니다. (최근 2년 기준)</span>
+    <span class="new-text" title="굵은 글씨를 누르면 바로 이동합니다"><b onclick="showTab('vendor')">업체별 제품정보</b>: 한국썸벳·고려BNP·중앙백신·MSD 등 업체를 고르면, 우리가 취급하는 제품의 특장점·성분·효능·용법을 업체 홈페이지 기준으로 <b>양돈/양계/축우/공통</b>으로 나눠 보여드립니다.</span>
     <button class="new-close" onclick="dismissNewNotice()" title="닫기">✕</button>
   </div>
 
   <nav>
     <div class="nav-tab active" onclick="showTab('stock')">제품정보</div>
+    <div class="nav-tab" onclick="showTab('vendor')">업체별 제품정보 <span class="new-badge">NEW</span></div>
     <div class="nav-tab" onclick="showTab('balance')">거래처 잔액</div>
     <div class="nav-tab" onclick="showTab('salesrank')">매출 순위</div>
     <div class="nav-tab" onclick="showTab('panal')">제품분석</div>
@@ -307,8 +333,8 @@ th.bigo{min-width:110px}
       <div id="pa-period"></div>
       <div class="search-row">
         <button class="toggle-btn on" id="pa-view-btn-item" onclick="setPaView('item')">품목별 순위</button>
-        <button class="toggle-btn" id="pa-view-btn-cm" onclick="setPaView('cm')">거래처×제조사 순위 <span class="new-badge">NEW</span></button>
-        <button class="toggle-btn" id="pa-view-btn-mg" onclick="setPaView('mg')">이익률 분석 <span class="new-badge">NEW</span></button>
+        <button class="toggle-btn" id="pa-view-btn-cm" onclick="setPaView('cm')">거래처×제조사 순위</button>
+        <button class="toggle-btn" id="pa-view-btn-mg" onclick="setPaView('mg')">이익률 분석</button>
       </div>
       <div id="pa-view-item">
       <div class="search-row">
@@ -475,6 +501,24 @@ th.bigo{min-width:110px}
       </div>
       <div style="font-size:11px;color:var(--text3);margin-bottom:14px">우리가 취급하는 제품명으로 QIA 공식 데이터를 찾아 휴약기간을 함께 보여드립니다 · 제품명 표기가 QIA 등록명과 달라 일부는 자동 매칭되지 않을 수 있어요 (그런 경우 "직접 검색" 버튼 이용)</div>
       <div id="wd-result"></div>
+    </div>
+    <div id="tab-vendor" style="display:none">
+      <div class="search-row" id="vd-vendors"></div>
+      <div class="search-row">
+        <button class="toggle-btn on" id="vd-sp-all" onclick="setVdSpecies('all')">축종 전체</button>
+        <button class="toggle-btn" id="vd-sp-양돈" onclick="setVdSpecies('양돈')">🐷 양돈</button>
+        <button class="toggle-btn" id="vd-sp-양계" onclick="setVdSpecies('양계')">🐔 양계</button>
+        <button class="toggle-btn" id="vd-sp-축우" onclick="setVdSpecies('축우')">🐄 축우</button>
+        <button class="toggle-btn" id="vd-sp-공통" onclick="setVdSpecies('공통')">공통</button>
+      </div>
+      <div class="search-row">
+        <input class="search-input" id="vd-q" placeholder="품명·성분·효능 검색..." oninput="renderVendor()">
+        <button class="toggle-btn" id="vd-stock-btn" onclick="toggleVdStockOnly()">재고있음만</button>
+        <button class="toggle-btn on" id="vd-mode-ours" onclick="setVdMode('ours')">취급 제품</button>
+        <button class="toggle-btn" id="vd-mode-all" onclick="setVdMode('all')">홈페이지 전체</button>
+      </div>
+      <div class="vd-note">우리가 취급하는 제품(제품정보의 제조사 기준)을 업체 홈페이지 제품정보와 이름으로 맞춰 보여드립니다 · 축종은 제품정보 탭에서 지정한 값이 우선이고, 없으면 홈페이지 분류를 따릅니다</div>
+      <div id="vendor-result"></div>
     </div>
   </main>
 </div>
@@ -805,13 +849,15 @@ function closeUploadDetail(e) {
 window.closeUploadDetail = closeUploadDetail;
 
 // ── 탭 ───────────────────────────────────────────
+// nav 의 .nav-tab 순서와 같아야 한다
+const TAB_NAMES = ['stock','vendor','balance','salesrank','panal','txn','inactive','info','qia','wd'];
 function showTab(name) {
   if (window.hiddenTabs && window.hiddenTabs.has(name)) name = 'stock';   // 이 계정에 숨긴 메뉴
-  ['stock','balance','salesrank','panal','txn','inactive','info','qia','wd'].forEach(t => {
+  TAB_NAMES.forEach(t => {
     document.getElementById('tab-'+t).style.display = t === name ? '' : 'none';
   });
   document.querySelectorAll('.nav-tab').forEach((el,i) => {
-    el.classList.toggle('active', ['stock','balance','salesrank','panal','txn','inactive','info','qia','wd'][i] === name);
+    el.classList.toggle('active', TAB_NAMES[i] === name);
   });
   if (name === 'inactive' && !document.querySelector('#inactive-result table')) searchInactive();
   if (name === 'salesrank' && !document.querySelector('#salesrank-result table')) searchSalesRank();
@@ -819,6 +865,7 @@ function showTab(name) {
   if (name === 'balance' && !document.querySelector('#balance-result table')) searchBalance();
   if (name === 'txn' && !document.querySelector('#txn-result table') && !document.getElementById('txn-company').value) autoLoadTodayTxn();
   if (name === 'info' && !document.querySelector('#info-result table')) searchInfo();
+  if (name === 'vendor') openVendorTab();
 }
 window.showTab = showTab;
 
@@ -3689,7 +3736,7 @@ function renderMargin() {
 window.renderMargin = renderMargin;
 
 // 새 메뉴 안내 줄 (메뉴 위). 닫으면 이 안내(NOTICE_KEY)만 다시 뜨지 않는다.
-const NEW_NOTICE_KEY = 'daehan_notice_cm_v2';
+const NEW_NOTICE_KEY = 'daehan_notice_vendor_v1';
 function dismissNewNotice() {
   document.getElementById('new-menu-notice').style.display = 'none';
   try { localStorage.setItem(NEW_NOTICE_KEY, '1'); } catch (e) {}
@@ -3697,9 +3744,9 @@ function dismissNewNotice() {
 window.dismissNewNotice = dismissNewNotice;
 function openNewMenu(v) { showTab('panal'); setPaView(v || 'cm'); }
 window.openNewMenu = openNewMenu;
-// NEW 배지·안내 줄은 이 날짜(포함)까지만 보인다 — 2026-10-31 공개 후 15일간.
+// NEW 배지·안내 줄은 이 날짜(포함)까지만 보인다 — 2026-11-13 업체별 제품정보 공개 후 15일간.
 // 다음 새 기능을 알릴 때는 날짜와 NEW_NOTICE_KEY를 함께 바꾼다.
-const NEW_UNTIL = '2026-11-14';
+const NEW_UNTIL = '2026-11-28';
 (function () {
   if (todayStr() > NEW_UNTIL) {
     document.querySelectorAll('.new-badge').forEach(b => b.remove());
@@ -3710,6 +3757,222 @@ const NEW_UNTIL = '2026-11-14';
   const el = document.getElementById('new-menu-notice');
   if (el && !seen) el.style.display = '';
 })();
+
+// ── 업체별 제품정보 ─────────────────────────────
+// 우리 제품(Firestore '제품', 대분류=제조사) 가운데 아래 업체 것만 골라, 업체 홈페이지에서 정리해 둔
+// 제품정보(vendor-products.json)와 이름으로 맞춰 양돈/양계/축우/공통으로 나눠 보여준다.
+// catalog 가 없는 업체는 홈페이지를 자동으로 읽어오지 못한 곳 — 취급 품목만 축종별로 보여준다.
+const VENDORS = [
+  { id:'thumbvet', name:'한국썸벳',     alias:['썸벧','썸벳'],                 home:'https://www.thumbvet.com' },
+  { id:'komipharm',name:'코미팜',       alias:['코미팜'],                      home:'http://www.komipharm.com' },
+  { id:'kbnp',     name:'고려BNP',      alias:['고려비엔피','고려bnp','비엔피','bnp'], home:'https://www.kbnp.co.kr' },
+  { id:'cavac',    name:'중앙백신',     alias:['중앙백신','중앙'],             home:'https://www.cavac.co.kr' },
+  { id:'msd',      name:'MSD',          alias:['msd','엠에스디'],              home:'https://www.msd-animal-health.co.kr' },
+  { id:'bi',       name:'베링거',       alias:['베링거'],                      home:'https://www.boehringer-ingelheim.com/kr/animal-health' },
+  { id:'sf',       name:'SF(과학사료)', alias:['과학사료','에스에프','^sf'],   home:'http://www.esef.co.kr' },
+  { id:'dawon',    name:'다원케미칼',   alias:['다원'],                        home:'http://www.daonechem.com' },
+];
+const VD_SPECIES = ['양돈','양계','축우','공통'];
+const VD_COLOR = { '양계':'#f0a050','양돈':'#e05555','축우':'#7F77DD','공통':'#36c4a0','미분류':'var(--text3)' };
+const VD_ICON = { '양돈':'🐷','양계':'🐔','축우':'🐄','공통':'🔗','미분류':'❔' };
+let vdVendor = 'thumbvet', vdSpecies = 'all', vdMode = 'ours', vdStockOnly = false;
+let vdCatalog = null;      // { 업체id: [ {n,c,sp,t,f,i,e,d,p,w,k,u,img} ] }
+let vdProducts = null;     // 우리 제품 전체 (대분류 'A' 제외)
+
+// 이름 비교용: 소문자, 괄호·기호·공백 제거
+function vdNorm(s) { return String(s || '').toLowerCase().replace(/[®™]/g, '').replace(/[^0-9a-z가-힣]/g, ''); }
+// 우리 품명 끝에 붙는 포장 표기(100ml, 1kg, 50두분, 10병 ...)를 걷어낸다
+function vdStripPack(s) {
+  return String(s || '').replace(/\(([^)]*)\)/g, ' $1 ')
+    .replace(/\d+(\.\d+)?\s*(ml|mℓ|l|ℓ|cc|g|kg|mg|두분|수분|수|두|ds|dose|도스|병|정|포|개|ea|t)\b(\s*[x×*]\s*\d+\s*(병|개|포|ea)?)?/gi, ' ');
+}
+function vdBigrams(s) { const o = new Set(); for (let i = 0; i < s.length - 1; i++) o.add(s.slice(i, i + 2)); return o; }
+function vdDice(a, b) {
+  if (a.length < 2 || b.length < 2) return 0;
+  const A = vdBigrams(a), B = vdBigrams(b); let n = 0;
+  A.forEach(x => { if (B.has(x)) n++; });
+  return 2 * n / (A.size + B.size);
+}
+// 홈페이지 제품 하나가 가질 수 있는 이름들 (전체, 괄호 앞, 괄호 안, ~ 로 나뉜 부분, 검색 태그)
+function vdAliases(c) {
+  if (c._al) return c._al;
+  const raw = [c.n, c.n.replace(/\([^)]*\)/g, ' ')];
+  (c.n.match(/\(([^)]*)\)/g) || []).forEach(x => raw.push(x));
+  c.n.split(/[~/]/).forEach(x => raw.push(x));
+  String(c.k || '').split(',').forEach(x => raw.push(x));
+  c._al = [...new Set(raw.map(vdNorm).filter(x => x.length >= 3))];
+  return c._al;
+}
+// 우리 품명 → 홈페이지 제품. 완전일치 > 포함(긴 이름 우선) > 글자쌍 유사도 0.72 이상
+function vdMatch(품명, list) {
+  const full = vdNorm(품명), core = vdNorm(vdStripPack(품명));
+  let best = null, bestScore = 0;
+  for (const c of list) {
+    for (const a of vdAliases(c)) {
+      let sc = 0;
+      if (a === core || a === full) sc = 3;
+      else if (full.includes(a)) sc = 2 + a.length / 100;
+      else if (core.length >= 3 && a.includes(core)) sc = 1.5 + core.length / 100;
+      else { const d = vdDice(a, core); if (d >= 0.72) sc = d; }
+      if (sc > bestScore) { bestScore = sc; best = c; }
+    }
+  }
+  return best;
+}
+function vdIsVendor(대분류, v) {
+  const m = String(대분류 || '').toLowerCase().replace(/[\s()㈜\-_.]/g, '').replace(/주식회사/g, '');
+  return v.alias.some(a => a[0] === '^' ? m.startsWith(a.slice(1)) : m.includes(a));
+}
+// 축종: 제품정보 탭에서 지정한 값 > 홈페이지 분류(한 축종이면 그 축종, 여럿이면 공통) > 품명 자동분류
+function vdSpeciesOf(품명, cat) {
+  const manual = 품명 && 제품축종[품명];
+  if (VD_SPECIES.includes(manual)) return manual;
+  if (cat && cat.sp && cat.sp.length) return cat.sp.length === 1 ? cat.sp[0] : '공통';
+  const auto = 품명 ? classifyProduct(품명) : '미지정';
+  return VD_SPECIES.includes(auto) ? auto : '미분류';
+}
+
+function vdRenderVendorButtons() {
+  document.getElementById('vd-vendors').innerHTML = VENDORS.map(v => {
+    const n = vdProducts ? vdProducts.filter(r => vdIsVendor(r.대분류, v)).length : null;
+    return `<button class="toggle-btn ${v.id === vdVendor ? 'on' : ''}" onclick="setVdVendor('${v.id}')">${esc(v.name)}${n == null ? '' : ` <span style="opacity:.7">${n}</span>`}</button>`;
+  }).join('');
+}
+async function openVendorTab() {
+  vdRenderVendorButtons();
+  if (vdCatalog && vdProducts) { renderVendor(); return; }
+  loading('vendor-result');
+  try {
+    const [cat, snap] = await Promise.all([
+      vdCatalog || fetch('vendor-products.json?v=20261113').then(r => { if (!r.ok) throw new Error('제품정보 파일을 불러오지 못했습니다'); return r.json(); }),
+      fsAll('제품', 2000),
+      loadProductSpecies(),
+    ]);
+    vdCatalog = cat;
+    vdProducts = snap.docs.map(d => d.data()).filter(r => r.대분류 !== 'A');
+    vdRenderVendorButtons();
+    renderVendor();
+  } catch (e) {
+    document.getElementById('vendor-result').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
+  }
+}
+window.openVendorTab = openVendorTab;
+function setVdVendor(id) { vdVendor = id; vdRenderVendorButtons(); renderVendor(); }
+window.setVdVendor = setVdVendor;
+function setVdSpecies(sp) {
+  vdSpecies = sp;
+  ['all', ...VD_SPECIES].forEach(s => document.getElementById('vd-sp-' + s).classList.toggle('on', s === sp));
+  renderVendor();
+}
+window.setVdSpecies = setVdSpecies;
+function setVdMode(m) {
+  vdMode = m;
+  document.getElementById('vd-mode-ours').classList.toggle('on', m === 'ours');
+  document.getElementById('vd-mode-all').classList.toggle('on', m === 'all');
+  renderVendor();
+}
+window.setVdMode = setVdMode;
+function toggleVdStockOnly() {
+  vdStockOnly = !vdStockOnly;
+  document.getElementById('vd-stock-btn').classList.toggle('on', vdStockOnly);
+  renderVendor();
+}
+window.toggleVdStockOnly = toggleVdStockOnly;
+
+// 화면에 뿌릴 행 목록: { 품명(우리), prod(우리 제품들), cat(홈페이지 제품), sp }
+function vdBuildRows(v) {
+  const list = (vdCatalog && vdCatalog[v.id]) || [];
+  const ours = vdProducts.filter(r => vdIsVendor(r.대분류, v));
+  const rows = ours.map(r => { const cat = vdMatch(r.품명, list); return { 품명: r.품명, prods: [r], cat, sp: vdSpeciesOf(r.품명, cat) }; });
+  if (vdMode === 'ours') return { rows, ours, list };
+  // 홈페이지 전체: 홈페이지 제품 기준으로, 맞는 우리 품목을 붙인다
+  const byCat = new Map();
+  rows.forEach(x => { if (x.cat) byCat.set(x.cat, (byCat.get(x.cat) || []).concat(x.prods)); });
+  return { ours, list, rows: list.map(c => {
+    const prods = byCat.get(c) || [];
+    return { 품명: '', prods, cat: c, sp: vdSpeciesOf(prods.length ? prods[0].품명 : '', c) };
+  }) };
+}
+function vdCard(x) {
+  const c = x.cat, sp = x.sp, col = VD_COLOR[sp];
+  const title = x.품명 || c.n;
+  const stock = x.prods.reduce((a, r) => a + (+r.현재재고 || 0), 0);
+  const tags = [`<span class="vd-tag" style="background:${col}22;color:${col}">${esc(sp)}</span>`];
+  if (c && c.c) tags.push(`<span class="vd-tag">${esc(c.c)}</span>`);
+  if (x.prods.length) tags.push(`<span class="tag ${stock > 0 ? 'tag-재고있음' : 'tag-재고없음'}">재고 ${fmtNum(stock)}</span>`);
+  else tags.push(`<span class="vd-tag" style="color:var(--text3)">미취급</span>`);
+  const sub = [];
+  if (c && x.품명 && vdNorm(c.n) !== vdNorm(x.품명)) sub.push('홈페이지명: ' + c.n);
+  if (!x.품명 && x.prods.length) sub.push('취급 품명: ' + x.prods.map(r => r.품명).join(', '));
+  if (c && c.t) sub.push('사용축종: ' + c.t);
+  const parts = c ? [['특장점', c.f], ['성분', c.i], ['효능·효과', c.e], ['용법·용량', c.d], ['포장단위', c.p], ['휴약기간', c.w]].filter(p => p[1]) : [];
+  const sum = c ? (c.f || c.e || c.i || '') : '';
+  const qiaName = jsq(x.품명 || c.n);
+  return `<div class="vd-card">
+    <div class="vd-head">
+      ${c && c.img ? `<img src="${esc(c.img)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}
+      <div style="min-width:0;flex:1">
+        <div class="vd-name">${esc(title)}</div>
+        ${sub.length ? `<div class="vd-sub">${esc(sub.join(' · '))}</div>` : ''}
+        <div class="vd-tags">${tags.join('')}</div>
+      </div>
+    </div>
+    ${sum ? `<div class="vd-sum">${esc(sum)}</div>` : `<div class="vd-none">홈페이지에서 일치하는 제품정보를 찾지 못했습니다</div>`}
+    ${parts.length > 1 || (sum && sum.length > 90) ? `<details><summary>상세 정보</summary><dl>${parts.map(p => `<dt>${p[0]}</dt><dd>${esc(p[1])}</dd>`).join('')}</dl></details>` : ''}
+    <div class="vd-links">
+      ${c && c.u ? `<a href="${esc(c.u)}" target="_blank" rel="noopener">업체 홈페이지 ↗</a>` : ''}
+      <a onclick="jumpToQiaSearch('${qiaName}')">허가정보 검색(QIA)</a>
+      ${x.품명 ? `<a onclick="editVdSpecies('${jsq(x.품명)}')">축종 지정</a>` : ''}
+    </div>
+  </div>`;
+}
+function renderVendor() {
+  const el = document.getElementById('vendor-result');
+  if (!vdCatalog || !vdProducts) return;
+  const v = VENDORS.find(x => x.id === vdVendor);
+  const { rows, ours, list } = vdBuildRows(v);
+  const q = document.getElementById('vd-q').value.trim().toLowerCase();
+  let items = rows;
+  if (vdStockOnly) items = items.filter(x => x.prods.some(r => (+r.현재재고 || 0) > 0));
+  if (vdSpecies !== 'all') items = items.filter(x => x.sp === vdSpecies);
+  if (q) items = items.filter(x => {
+    const c = x.cat || {};
+    return [x.품명, ...x.prods.map(r => r.품명), c.n, c.c, c.f, c.i, c.e, c.k].some(t => t && String(t).toLowerCase().includes(q));
+  });
+  const home = v.home ? `<a href="${esc(v.home)}" target="_blank" rel="noopener">${esc(v.name)} 홈페이지 ↗</a>` : '';
+  let head = '';
+  if (!list.length) {
+    head = `<div class="vd-warn"><b>${esc(v.name)}</b> 홈페이지의 제품정보는 아직 자동으로 가져오지 못했습니다. 취급 품목만 축종별로 보여드리며, 제품별 <b>허가정보 검색(QIA)</b>으로 성분·효능을 확인할 수 있습니다. ${home}</div>`;
+  } else {
+    const matched = rows.filter(x => x.cat && x.prods.length).length;
+    head = `<div class="vd-note">${esc(v.name)} · 취급 ${ours.length}개 품목 중 ${vdMode === 'ours' ? matched : new Set(rows.filter(x => x.prods.length).flatMap(x => x.prods)).size}개가 홈페이지 제품정보(${list.length}개)와 연결됨 · ${home}</div>`;
+  }
+  if (!ours.length && vdMode === 'ours') {
+    el.innerHTML = head + `<div class="empty">제품정보에 제조사가 "${esc(v.name)}"(으)로 등록된 품목이 없습니다${list.length ? ' · <a style="color:var(--blue);cursor:pointer" onclick="setVdMode(\'all\')">홈페이지 전체 제품 보기</a>' : ''}</div>`;
+    return;
+  }
+  if (!items.length) { el.innerHTML = head + '<div class="empty">조건에 맞는 제품이 없습니다</div>'; return; }
+  const groups = [...VD_SPECIES, '미분류'].map(sp => [sp, items.filter(x => x.sp === sp)]).filter(g => g[1].length);
+  el.innerHTML = head + groups.map(([sp, arr]) => {
+    arr.sort((a, b) => (b.cat ? 1 : 0) - (a.cat ? 1 : 0) || String(a.품명 || a.cat.n).localeCompare(String(b.품명 || b.cat.n), 'ko'));
+    return `<div class="vd-sec" style="color:${VD_COLOR[sp]}">${VD_ICON[sp]} ${sp} <span class="cnt">${arr.length}개${sp === '미분류' ? ' · "축종 지정"을 누르면 분류됩니다' : ''}</span></div>
+      <div class="vd-grid">${arr.map(vdCard).join('')}</div>`;
+  }).join('');
+}
+window.renderVendor = renderVendor;
+
+// 축종 지정: 제품정보 탭의 팝업을 그대로 쓰되, 저장 뒤 이 탭을 다시 그린다
+function editVdSpecies(품명) {
+  editProductSpecies(품명);
+  const modal = document.getElementById('prod-sp-modal');
+  if (!modal) return;
+  modal.querySelectorAll('button[onclick^="doSetProductSpecies"]').forEach(b => {
+    const m = /,'([^']+)'\)$/.exec(b.getAttribute('onclick'));
+    b.removeAttribute('onclick');
+    b.onclick = async () => { if (await saveProductSpecies(품명, m[1])) { closeProdSp(); renderVendor(); } };
+  });
+}
+window.editVdSpecies = editVdSpecies;
 
 // ── 거래처 정보 ────────────────────────────────
 let infoItems = [];
