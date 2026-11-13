@@ -1,5 +1,5 @@
 // UI checks are for usability. firestore.rules enforces access on the server.
-const ALLOWED_EMAILS = ['trsumun@gmail.com', 'jinhee4ys@gmail.com'];
+const ALLOWED_EMAILS = ['trsumun@gmail.com', 'jinhee4ys@gmail.com', 'daehan2372@gmail.com'];
 const loginButton = document.getElementById('google-login-btn');
 const logoutButton = document.getElementById('logout-btn');
 const message = document.getElementById('login-err');
