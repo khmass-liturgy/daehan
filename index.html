@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>대한가축약품 조회</title>
+<title>대한동물약품 조회</title>
 <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
@@ -14,7 +14,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="대한가축약품">
+<meta name="apple-mobile-web-app-title" content="대한동물약품">
 <style>
 :root {
   --bg:#0f1117; --bg2:#181c26; --bg3:#1e2330;
@@ -2118,7 +2118,7 @@ async function buildHaccpDoc() {
   ${withPrice ? `<div class="tot">공급가액 합계 <b>${fmtNum(sum)}원</b></div>` : ''}
   <div class="sign">
     <div>경기도 파주시 평화로37</div>
-    <div class="co">대한가축약품</div>
+    <div class="co">대한동물약품</div>
     <div class="who" style="white-space:pre">조  민  형 (인)<img class="seal" src="${new URL('icons/seal-jominhyung.png', location.href).href}" alt=""></div>
   </div>
 </body></html>`;
@@ -2289,7 +2289,7 @@ function makeKakaoCover(title, sub) {
   g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle';
   const font = '"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",sans-serif';
   g.font = `600 30px ${font}`; g.globalAlpha = .85;
-  g.fillText('대한가축약품', 400, 60);
+  g.fillText('대한동물약품', 400, 60);
   g.globalAlpha = 1;
   // 제목은 폭에 맞게 글자 크기를 줄여 한 줄(길면 두 줄)로
   let size = 76;
@@ -2345,7 +2345,7 @@ async function kakaoSendBlob(blob, title, sub, btnTitle) {
     objectType: 'feed',
     content: {
       title,
-      description: `${sub} · 대한가축약품`,
+      description: `${sub} · 대한동물약품`,
       imageUrl: cv.url, imageWidth: cv.width, imageHeight: cv.height,
       link: { mobileWebUrl: viewUrl, webUrl: viewUrl }
     },
