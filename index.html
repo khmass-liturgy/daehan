@@ -3764,7 +3764,7 @@ const NEW_UNTIL = '2026-11-28';
 // 제품정보(vendor-products.json)와 이름으로 맞춰 양돈/양계/축우/공통으로 나눠 보여준다.
 // catalog 가 없는 업체는 홈페이지를 자동으로 읽어오지 못한 곳 — 취급 품목만 축종별로 보여준다.
 const VENDORS = [
-  { id:'thumbvet', name:'한국썸벳',     alias:['썸벧','썸벳'],                 home:'https://www.thumbvet.com' },
+  { id:'thumbvet', name:'한국썸벳',     alias:['썸벧','썸벳','썸베','썸뱃','썸벹','thumb'], home:'https://www.thumbvet.com' },
   { id:'komipharm',name:'코미팜',       alias:['코미팜'],                      home:'http://www.komipharm.com' },
   { id:'kbnp',     name:'고려BNP',      alias:['고려비엔피','고려bnp','비엔피','bnp'], home:'https://www.kbnp.co.kr' },
   { id:'cavac',    name:'중앙백신',     alias:['중앙백신','중앙'],             home:'https://www.cavac.co.kr' },
@@ -3941,6 +3941,8 @@ function renderVendor() {
   if (!vdCatalog || !vdProducts) return;
   const v = VENDORS.find(x => x.id === vdVendor);
   const { rows, ours, list } = vdBuildRows(v);
+  const mfgCount = new Map(); ours.forEach(r => mfgCount.set(r.대분류, (mfgCount.get(r.대분류) || 0) + 1));
+  const mfgLine = mfgCount.size ? `<div class="vd-note" style="margin-top:-8px">제품정보의 제조사명: ${[...mfgCount].sort((a, b) => b[1] - a[1]).map(([m, n]) => `<b>${esc(m)}</b> ${n}개`).join(' · ')}</div>` : '';
   const q = document.getElementById('vd-q').value.trim().toLowerCase();
   let items = rows;
   if (vdStockOnly) items = items.filter(x => x.prods.some(r => (+r.현재재고 || 0) > 0));
@@ -3960,8 +3962,11 @@ function renderVendor() {
     const matched = rows.filter(x => x.cat && !x.cat.qia && x.prods.length);
     head = `<div class="vd-note">${esc(v.name)} · 취급 ${ours.length}개 품목 중 ${new Set(matched.flatMap(x => x.prods)).size}개가 홈페이지 제품정보(${list.length}개)와 연결됨${vdMode === 'ours' && qText ? ' · 나머지는 ' + qText : ''} · ${home}</div>`;
   }
+  head += mfgLine;
   if (!ours.length && vdMode === 'ours') {
-    el.innerHTML = head + `<div class="empty">제품정보에 제조사가 "${esc(v.name)}"(으)로 등록된 품목이 없습니다${list.length ? ' · <a style="color:var(--blue);cursor:pointer" onclick="setVdMode(\'all\')">홈페이지 전체 제품 보기</a>' : ''}</div>`;
+    const all = new Map(); vdProducts.forEach(r => all.set(r.대분류, (all.get(r.대분류) || 0) + 1));
+    el.innerHTML = head + `<div class="empty">제품정보에 제조사가 "${esc(v.name)}"(으)로 등록된 품목이 없습니다${list.length ? ' · <a style="color:var(--blue);cursor:pointer" onclick="setVdMode(\'all\')">홈페이지 전체 제품 보기</a>' : ''}</div>
+      <div class="vd-note">제품정보에 등록된 제조사명 전체(${all.size}곳) — 이 업체가 다른 이름으로 등록돼 있다면 알려 주세요:<br>${[...all].sort((a, b) => String(a[0]).localeCompare(String(b[0]), 'ko')).map(([m, n]) => `${esc(m || '(없음)')} ${n}`).join(' · ')}</div>`;
     return;
   }
   if (!items.length) { el.innerHTML = head + '<div class="empty">조건에 맞는 제품이 없습니다</div>'; return; }
