@@ -39,6 +39,7 @@ async function setup(options = {}) {
     GoogleAuthProvider: class { setCustomParameters(p) { assert.equal(p.prompt, 'select_account'); } },
     onIdTokenChanged: (_, fn) => { listener = fn; },
     signInWithPopup: async () => { calls.popup++; if (options.popupError) throw { code: options.popupError }; },
+    signInWithEmailAndPassword: async (_, email, password) => { calls.pw = [email, password]; if (options.pwError) throw { code: options.pwError }; },
     signOut: async () => { calls.signedOut++; await listener(null); }
   };
   // 메뉴 숨김 검사용 가짜 탭 (nav .nav-tab)
@@ -67,7 +68,8 @@ async function setup(options = {}) {
   return {
     calls, getElement, navTabs, window: context.window, emit: value => listener(value),
     visible: () => getElement('app').classList.values.has('show'),
-    click: id => getElement(id).listeners.click()
+    click: id => getElement(id).listeners.click(),
+    submitPw: (email, password) => { getElement('pw-email').value = email; getElement('pw-password').value = password; return getElement('pw-login-form').listeners.submit({ preventDefault() {} }); }
   };
 }
 
@@ -110,7 +112,31 @@ test('other accounts still see every menu', async () => {
   assert.equal(h.window.hiddenTabs.size, 0);
 });
 
+const pwClaims = { email: 'hyb0215@naver.com', firebase: { sign_in_provider: 'password' } };
+
+test('approved ID/password account can enter without email verification', async () => {
+  const h = await setup();
+  await h.emit(user(pwClaims));
+  assert.equal(h.calls.started, 1);
+  assert.equal(h.visible(), true);
+});
+
+test('ID/password sign-in form sends the typed credentials', async () => {
+  const h = await setup();
+  await h.submitPw(' hyb0215@naver.com ', 'secret');
+  assert.deepEqual(h.calls.pw, ['hyb0215@naver.com', 'secret']);
+  assert.equal(h.getElement('pw-password').value, '');
+});
+
+test('wrong ID/password shows a friendly message', async () => {
+  const h = await setup({ pwError: 'auth/invalid-credential' });
+  await h.submitPw('hyb0215@naver.com', 'bad');
+  assert.match(h.getElement('login-err').textContent, /올바르지 않습니다/);
+});
+
 for (const [name, claims] of [
+  ['password login for an account not on the password list', { email: 'trsumun@gmail.com', firebase: { sign_in_provider: 'password' } }],
+  ['password login for an unlisted email', { email: 'someone@example.com', firebase: { sign_in_provider: 'password' } }],
   ['unverified employee', { ...owner, email: 'jinhee4ys@gmail.com', email_verified: false }],
   ['employee using password provider', { ...owner, email: 'jinhee4ys@gmail.com', firebase: { sign_in_provider: 'password' } }],
   ['different email', { ...owner, email: 'someone@example.com' }],

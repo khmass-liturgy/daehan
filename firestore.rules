@@ -2,10 +2,14 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function isAuthorizedEditor() {
-      return request.auth != null
-        && request.auth.token.email in ['trsumun@gmail.com', 'jinhee4ys@gmail.com', 'daehan2372@gmail.com', 'hyb0215@naver.com']
-        && request.auth.token.email_verified == true
-        && request.auth.token.firebase.sign_in_provider == 'google.com';
+      return request.auth != null && (
+        (request.auth.token.email in ['trsumun@gmail.com', 'jinhee4ys@gmail.com', 'daehan2372@gmail.com', 'hyb0215@naver.com']
+          && request.auth.token.email_verified == true
+          && request.auth.token.firebase.sign_in_provider == 'google.com')
+        // 아이디·비밀번호 로그인: 콘솔에서 만든 계정(이메일 인증 없음). 이 목록의 계정만 허용
+        || (request.auth.token.email in ['hyb0215@naver.com']
+          && request.auth.token.firebase.sign_in_provider == 'password')
+      );
     }
 
     function validMapping(nameField, species) {
