@@ -3809,6 +3809,14 @@ function vdAliases(c) {
   c._al = [...new Set(raw.map(vdNorm).filter(x => x.length >= 3))];
   return c._al;
 }
+// 제품명에서 나온 이름만 (검색 태그 제외) — 다른 제조사명으로 등록된 품목을 품명으로 끌어올 때 쓴다
+function vdNameAliases(c) {
+  if (c._nal) return c._nal;
+  const raw = [c.n, c.n.replace(/\([^)]*\)/g, ' ')];
+  (c.n.match(/\(([^)]*)\)/g) || []).forEach(x => raw.push(x));
+  c._nal = [...new Set(raw.map(vdNorm).filter(x => x.length >= 4))];
+  return c._nal;
+}
 // 우리 품명 → 홈페이지 제품. 완전일치 > 포함(긴 이름 우선) > 글자쌍 유사도 0.72 이상
 function vdMatch(품명, list) {
   const full = vdNorm(품명), core = vdNorm(vdStripPack(품명));
@@ -3831,6 +3839,28 @@ function vdIsVendor(대분류, v) {
   const m = vdMfgKey(대분류);
   return v.alias.some(a => a[0] === '^' ? m.startsWith(vdMfgKey(a.slice(1))) : m.includes(vdMfgKey(a)));
 }
+// 품명이 홈페이지 제품과 확실히 같은지(완전일치, 또는 4글자 이상 제품명이 품명에 그대로 들어 있음)
+function vdStrongMatch(품명, list) {
+  const full = vdNorm(품명), core = vdNorm(vdStripPack(품명));
+  for (const c of list) for (const a of vdNameAliases(c)) {
+    if ((a === core || a === full || full.includes(a))) return c;
+  }
+  return null;
+}
+// 이 업체 취급 품목: 제조사명이 이 업체인 것 + 제조사명은 다르지만(다른 8개 업체도 아님) 품명이 이 업체 홈페이지 제품과 확실히 같은 것
+const vdOursCache = new Map();
+function vdOurs(v) {
+  if (vdOursCache.has(v.id)) return vdOursCache.get(v.id);
+  const list = (vdCatalog && vdCatalog[v.id]) || [];
+  const res = vdProducts.filter(r => {
+    if (vdIsVendor(r.대분류, v)) return true;
+    if (!list.length || VENDORS.some(o => o !== v && vdIsVendor(r.대분류, o))) return false;
+    if (vdStrongMatch(r.품명, list)) { r._byName = true; return true; }
+    return false;
+  });
+  vdOursCache.set(v.id, res);
+  return res;
+}
 // 축종: 제품정보 탭에서 지정한 값 > 홈페이지 분류(한 축종이면 그 축종, 여럿이면 공통) > 품명 자동분류
 function vdSpeciesOf(품명, cat) {
   const manual = 품명 && 제품축종[품명];
@@ -3843,7 +3873,7 @@ function vdSpeciesOf(품명, cat) {
 
 function vdRenderVendorButtons() {
   document.getElementById('vd-vendors').innerHTML = VENDORS.map(v => {
-    const n = vdProducts ? vdProducts.filter(r => vdIsVendor(r.대분류, v)).length : null;
+    const n = vdProducts && vdCatalog ? vdOurs(v).length : null;
     return `<button class="toggle-btn ${v.id === vdVendor ? 'on' : ''}" onclick="setVdVendor('${v.id}')">${esc(v.name)}${n == null ? '' : ` <span style="opacity:.7">${n}</span>`}</button>`;
   }).join('');
 }
@@ -3892,7 +3922,7 @@ window.toggleVdStockOnly = toggleVdStockOnly;
 // 화면에 뿌릴 행 목록: { 품명(우리), prod(우리 제품들), cat(홈페이지 제품), sp }
 function vdBuildRows(v) {
   const list = (vdCatalog && vdCatalog[v.id]) || [];
-  const ours = vdProducts.filter(r => vdIsVendor(r.대분류, v));
+  const ours = vdOurs(v);
   const rows = ours.map(r => { const cat = vdMatch(r.품명, list) || vdQia.get(r.품명) || null; return { 품명: r.품명, prods: [r], cat, sp: vdSpeciesOf(r.품명, cat) }; });
   if (vdMode === 'ours') return { rows, ours, list };
   // 홈페이지 전체: 홈페이지 제품 기준으로, 맞는 우리 품목을 붙인다
@@ -3943,8 +3973,8 @@ function renderVendor() {
   if (!vdCatalog || !vdProducts) return;
   const v = VENDORS.find(x => x.id === vdVendor);
   const { rows, ours, list } = vdBuildRows(v);
-  const mfgCount = new Map(); ours.forEach(r => mfgCount.set(r.대분류, (mfgCount.get(r.대분류) || 0) + 1));
-  const mfgLine = mfgCount.size ? `<div class="vd-note" style="margin-top:-8px">제품정보의 제조사명: ${[...mfgCount].sort((a, b) => b[1] - a[1]).map(([m, n]) => `<b>${esc(m)}</b> ${n}개`).join(' · ')}</div>` : '';
+  const mfgCount = new Map(); ours.forEach(r => { const k = (r.대분류 || '(없음)') + (vdIsVendor(r.대분류, v) ? '' : ' (품명으로 찾음)'); mfgCount.set(k, (mfgCount.get(k) || 0) + 1); });
+  const mfgLine = mfgCount.size ? `<div class="vd-note" style="margin-top:-8px">제품정보에 등록된 제조사명: ${[...mfgCount].sort((a, b) => b[1] - a[1]).map(([m, n]) => `<b>${esc(m)}</b> ${n}개`).join(' · ')}</div>` : '';
   const q = document.getElementById('vd-q').value.trim().toLowerCase();
   let items = rows;
   if (vdStockOnly) items = items.filter(x => x.prods.some(r => (+r.현재재고 || 0) > 0));
@@ -4001,7 +4031,7 @@ async function vdLoadQia() {
   if (!vdCatalog || !vdProducts) return;
   const v = VENDORS.find(x => x.id === vdVendor);
   const list = vdCatalog[v.id] || [];
-  const todo = vdProducts.filter(r => r.품명 && vdIsVendor(r.대분류, v) && !vdQia.has(r.품명) && !vdMatch(r.품명, list)).map(r => r.품명);
+  const todo = vdOurs(v).filter(r => r.품명 && !vdQia.has(r.품명) && !vdMatch(r.품명, list)).map(r => r.품명);
   if (!todo.length) return;
   const run = ++vdQiaRun;
   await qiaMapLimit([...new Set(todo)], 3, async 품명 => {
