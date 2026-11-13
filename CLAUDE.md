@@ -11,7 +11,7 @@ Firebase 프로젝트: `daehan-adb1d`. Google 로그인(`auth.js`)을 사용하�
 "업체별 제품정보" 탭은 Firestore `제품`(대분류=제조사) 중 8개 업체(한국썸벳·코미팜·고려BNP·중앙백신·MSD·베링거·SF·다원케미칼) 품목을 골라,
 업체 홈페이지에서 정리해 둔 `vendor-products.json`과 품명으로 맞춰 양돈/양계/축우/공통으로 보여준다(`index.html`의 `VENDORS`, `vdMatch`).
 - `vendor-products.json`은 `{ 업체id: [{n 제품명, c 분류, sp 축종[], t 사용축종, f 특장점, i 성분, e 효능, d 용법, p 포장, w 휴약, k 검색어, u 링크, img}] }` 형식의 정적 파일이다. 로컬 사본 동기화 때 `index.html`과 함께 복사한다.
-- 홈페이지 자료가 들어 있는 업체: 한국썸벧(thumbvet.com), 고려비엔피(kbnp.co.kr), 중앙백신(cavac.co.kr), MSD(msd-animal-health.co.kr). 2026-11-13 수집.
+- 홈페이지 자료가 들어 있는 업체: 한국썸벧(thumbvet.com), 고려비엔피(kbnp.co.kr), 중앙백신(cavac.co.kr), MSD(msd-animal-health.co.kr). 2026-11-13 수집. 고려비엔피(217개)는 이 세션 IP가 차단돼 farm-pro 오라클 VM에서 수집해 비공개 Gist로 넘겨받았다(브라우저 User-Agent가 아니면 403).
 - 코미팜·베링거·SF(esef.co.kr)·다원케미칼(daonechem.com)은 홈페이지를 자동 수집할 수 없어 비어 있다(코미팜·다원·SF는 HTTP 전용이라 HTTPS로는 호스팅 업체의 만료 인증서가 나오고, 베링거는 봇 차단). 인증서 검증을 끄는 방식으로 우회하지 않는다.
 - 홈페이지 정보와 못 맞춘 취급 품목은 화면에서 검역본부(QIA) 허가정보로 대신 채운다(`vdLoadQia` → 휴약기간 탭의 `wdLookupOne`·`qiaDetailInfo` 재사용, 동시 3개). 카드에 "허가정보" 표시가 붙는다.
 - 빈 업체에 홈페이지 자료를 넣으려면 같은 형식으로 해당 업체id(`komipharm`,`bi`,`sf`,`dawon`) 배열을 채우면 된다.
