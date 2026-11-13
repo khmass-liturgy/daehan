@@ -141,6 +141,7 @@ tr:hover td{background:var(--bg3)}
 .vd-links{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:11px}
 .vd-links a{color:var(--blue);cursor:pointer;text-decoration:none}
 .vd-none{font-size:11px;color:var(--text3);margin-top:8px}
+.vd-none .spinner{width:10px;height:10px;border-width:2px;vertical-align:-1px;margin-right:4px}
 @media (max-width:600px){.vd-grid{grid-template-columns:1fr}}
 .new-badge{display:inline-block;background:var(--blue);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;letter-spacing:.3px;flex:none;line-height:1.5}
 .nav-tab.active .new-badge{background:#fff;color:var(--blue)}
@@ -517,7 +518,7 @@ th.bigo{min-width:110px}
         <button class="toggle-btn on" id="vd-mode-ours" onclick="setVdMode('ours')">취급 제품</button>
         <button class="toggle-btn" id="vd-mode-all" onclick="setVdMode('all')">홈페이지 전체</button>
       </div>
-      <div class="vd-note">우리가 취급하는 제품(제품정보의 제조사 기준)을 업체 홈페이지 제품정보와 이름으로 맞춰 보여드립니다 · 축종은 제품정보 탭에서 지정한 값이 우선이고, 없으면 홈페이지 분류를 따릅니다</div>
+      <div class="vd-note">우리가 취급하는 제품(제품정보의 제조사 기준)을 업체 홈페이지 제품정보와 이름으로 맞춰 보여드립니다 · 홈페이지에 없는 품목은 검역본부(QIA) 허가정보로 대신합니다 · 축종은 제품정보 탭에서 지정한 값이 우선입니다</div>
       <div id="vendor-result"></div>
     </div>
   </main>
@@ -3778,6 +3779,11 @@ const VD_ICON = { '양돈':'🐷','양계':'🐔','축우':'🐄','공통':'🔗
 let vdVendor = 'thumbvet', vdSpecies = 'all', vdMode = 'ours', vdStockOnly = false;
 let vdCatalog = null;      // { 업체id: [ {n,c,sp,t,f,i,e,d,p,w,k,u,img} ] }
 let vdProducts = null;     // 우리 제품 전체 (대분류 'A' 제외)
+// 홈페이지 제품정보와 못 맞춘 품목은 검역본부(QIA) 허가정보에서 찾아 대신 보여준다.
+// 품명 → { qia:true, n, c, sp, e, p, w, u, maker } | null(못 찾음). 키가 없으면 아직 조회 전.
+const vdQia = new Map();
+let vdQiaRun = 0;          // 업체를 바꾸면 앞선 조회의 화면 갱신을 멈추기 위한 번호
+let vdQiaTimer = null;
 
 // 이름 비교용: 소문자, 괄호·기호·공백 제거
 function vdNorm(s) { return String(s || '').toLowerCase().replace(/[®™]/g, '').replace(/[^0-9a-z가-힣]/g, ''); }
@@ -3828,6 +3834,7 @@ function vdSpeciesOf(품명, cat) {
   const manual = 품명 && 제품축종[품명];
   if (VD_SPECIES.includes(manual)) return manual;
   if (cat && cat.sp && cat.sp.length) return cat.sp.length === 1 ? cat.sp[0] : '공통';
+  if (cat && cat.qia && cat.e) return '공통';   // 허가정보는 찾았지만 대상 축종이 소·돼지·닭이 아닌 경우
   const auto = 품명 ? classifyProduct(품명) : '미지정';
   return VD_SPECIES.includes(auto) ? auto : '미분류';
 }
@@ -3840,7 +3847,7 @@ function vdRenderVendorButtons() {
 }
 async function openVendorTab() {
   vdRenderVendorButtons();
-  if (vdCatalog && vdProducts) { renderVendor(); return; }
+  if (vdCatalog && vdProducts) { renderVendor(); vdLoadQia(); return; }
   loading('vendor-result');
   try {
     const [cat, snap] = await Promise.all([
@@ -3852,12 +3859,13 @@ async function openVendorTab() {
     vdProducts = snap.docs.map(d => d.data()).filter(r => r.대분류 !== 'A');
     vdRenderVendorButtons();
     renderVendor();
+    vdLoadQia();
   } catch (e) {
     document.getElementById('vendor-result').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`;
   }
 }
 window.openVendorTab = openVendorTab;
-function setVdVendor(id) { vdVendor = id; vdRenderVendorButtons(); renderVendor(); }
+function setVdVendor(id) { vdVendor = id; vdRenderVendorButtons(); renderVendor(); vdLoadQia(); }
 window.setVdVendor = setVdVendor;
 function setVdSpecies(sp) {
   vdSpecies = sp;
@@ -3883,11 +3891,11 @@ window.toggleVdStockOnly = toggleVdStockOnly;
 function vdBuildRows(v) {
   const list = (vdCatalog && vdCatalog[v.id]) || [];
   const ours = vdProducts.filter(r => vdIsVendor(r.대분류, v));
-  const rows = ours.map(r => { const cat = vdMatch(r.품명, list); return { 품명: r.품명, prods: [r], cat, sp: vdSpeciesOf(r.품명, cat) }; });
+  const rows = ours.map(r => { const cat = vdMatch(r.품명, list) || vdQia.get(r.품명) || null; return { 품명: r.품명, prods: [r], cat, sp: vdSpeciesOf(r.품명, cat) }; });
   if (vdMode === 'ours') return { rows, ours, list };
   // 홈페이지 전체: 홈페이지 제품 기준으로, 맞는 우리 품목을 붙인다
   const byCat = new Map();
-  rows.forEach(x => { if (x.cat) byCat.set(x.cat, (byCat.get(x.cat) || []).concat(x.prods)); });
+  rows.forEach(x => { if (x.cat && !x.cat.qia) byCat.set(x.cat, (byCat.get(x.cat) || []).concat(x.prods)); });
   return { ours, list, rows: list.map(c => {
     const prods = byCat.get(c) || [];
     return { 품명: '', prods, cat: c, sp: vdSpeciesOf(prods.length ? prods[0].품명 : '', c) };
@@ -3899,10 +3907,12 @@ function vdCard(x) {
   const stock = x.prods.reduce((a, r) => a + (+r.현재재고 || 0), 0);
   const tags = [`<span class="vd-tag" style="background:${col}22;color:${col}">${esc(sp)}</span>`];
   if (c && c.c) tags.push(`<span class="vd-tag">${esc(c.c)}</span>`);
+  if (c && c.qia) tags.push(`<span class="vd-tag" style="color:var(--amber)">허가정보</span>`);
   if (x.prods.length) tags.push(`<span class="tag ${stock > 0 ? 'tag-재고있음' : 'tag-재고없음'}">재고 ${fmtNum(stock)}</span>`);
   else tags.push(`<span class="vd-tag" style="color:var(--text3)">미취급</span>`);
   const sub = [];
-  if (c && x.품명 && vdNorm(c.n) !== vdNorm(x.품명)) sub.push('홈페이지명: ' + c.n);
+  if (c && x.품명 && vdNorm(c.n) !== vdNorm(x.품명)) sub.push((c.qia ? '허가 제품명: ' : '홈페이지명: ') + c.n);
+  if (c && c.qia && c.maker) sub.push('허가업체: ' + c.maker);
   if (!x.품명 && x.prods.length) sub.push('취급 품명: ' + x.prods.map(r => r.품명).join(', '));
   if (c && c.t) sub.push('사용축종: ' + c.t);
   const parts = c ? [['특장점', c.f], ['성분', c.i], ['효능·효과', c.e], ['용법·용량', c.d], ['포장단위', c.p], ['휴약기간', c.w]].filter(p => p[1]) : [];
@@ -3917,10 +3927,10 @@ function vdCard(x) {
         <div class="vd-tags">${tags.join('')}</div>
       </div>
     </div>
-    ${sum ? `<div class="vd-sum">${esc(sum)}</div>` : `<div class="vd-none">홈페이지에서 일치하는 제품정보를 찾지 못했습니다</div>`}
+    ${sum ? `<div class="vd-sum">${esc(sum)}</div>` : `<div class="vd-none">${c && c.qia ? '허가정보에 효능·효과 본문이 없습니다' : x.품명 && !vdQia.has(x.품명) ? '<span class="spinner"></span> 검역본부 허가정보 조회 중...' : '홈페이지·허가정보에서 일치하는 제품을 찾지 못했습니다'}</div>`}
     ${parts.length > 1 || (sum && sum.length > 90) ? `<details><summary>상세 정보</summary><dl>${parts.map(p => `<dt>${p[0]}</dt><dd>${esc(p[1])}</dd>`).join('')}</dl></details>` : ''}
     <div class="vd-links">
-      ${c && c.u ? `<a href="${esc(c.u)}" target="_blank" rel="noopener">업체 홈페이지 ↗</a>` : ''}
+      ${c && c.u ? `<a href="${esc(c.u)}" target="_blank" rel="noopener">${c.qia ? '검역본부 허가정보 ↗' : '업체 홈페이지 ↗'}</a>` : ''}
       <a onclick="jumpToQiaSearch('${qiaName}')">허가정보 검색(QIA)</a>
       ${x.품명 ? `<a onclick="editVdSpecies('${jsq(x.품명)}')">축종 지정</a>` : ''}
     </div>
@@ -3941,11 +3951,14 @@ function renderVendor() {
   });
   const home = v.home ? `<a href="${esc(v.home)}" target="_blank" rel="noopener">${esc(v.name)} 홈페이지 ↗</a>` : '';
   let head = '';
+  const noHome = rows.filter(x => x.품명 && !(x.cat && !x.cat.qia));          // 홈페이지 정보가 없는 취급 품목
+  const qDone = noHome.filter(x => vdQia.has(x.품명)).length, qHit = noHome.filter(x => x.cat && x.cat.qia).length;
+  const qText = noHome.length ? `검역본부(QIA) 허가정보 ${qDone < noHome.length ? `조회 중 ${qDone}/${noHome.length}` : `${noHome.length}개 중 ${qHit}개 찾음`}` : '';
   if (!list.length) {
-    head = `<div class="vd-warn"><b>${esc(v.name)}</b> 홈페이지의 제품정보는 아직 자동으로 가져오지 못했습니다. 취급 품목만 축종별로 보여드리며, 제품별 <b>허가정보 검색(QIA)</b>으로 성분·효능을 확인할 수 있습니다. ${home}</div>`;
+    head = `<div class="vd-warn"><b>${esc(v.name)}</b> 홈페이지는 자동으로 읽어올 수 없어, 취급 품목의 효능·휴약기간을 <b>검역본부 허가정보</b>에서 대신 가져옵니다. ${qText ? '· ' + qText : ''} ${home ? '· ' + home : ''}</div>`;
   } else {
-    const matched = rows.filter(x => x.cat && x.prods.length).length;
-    head = `<div class="vd-note">${esc(v.name)} · 취급 ${ours.length}개 품목 중 ${vdMode === 'ours' ? matched : new Set(rows.filter(x => x.prods.length).flatMap(x => x.prods)).size}개가 홈페이지 제품정보(${list.length}개)와 연결됨 · ${home}</div>`;
+    const matched = rows.filter(x => x.cat && !x.cat.qia && x.prods.length);
+    head = `<div class="vd-note">${esc(v.name)} · 취급 ${ours.length}개 품목 중 ${new Set(matched.flatMap(x => x.prods)).size}개가 홈페이지 제품정보(${list.length}개)와 연결됨${vdMode === 'ours' && qText ? ' · 나머지는 ' + qText : ''} · ${home}</div>`;
   }
   if (!ours.length && vdMode === 'ours') {
     el.innerHTML = head + `<div class="empty">제품정보에 제조사가 "${esc(v.name)}"(으)로 등록된 품목이 없습니다${list.length ? ' · <a style="color:var(--blue);cursor:pointer" onclick="setVdMode(\'all\')">홈페이지 전체 제품 보기</a>' : ''}</div>`;
@@ -3960,6 +3973,44 @@ function renderVendor() {
   }).join('');
 }
 window.renderVendor = renderVendor;
+
+// 홈페이지 정보가 없는 취급 품목을 QIA에서 찾는다 (휴약기간 탭과 같은 매칭·캐시 사용, 동시에 3개씩)
+const VD_QIA_SP = { pig:'양돈', chicken:'양계', duck:'양계', cattle:'축우' };
+async function vdQiaOne(품명) {
+  try {
+    const r = await wdLookupOne(품명);
+    if (!r || !r.링크 || r.status === 'notfound') return null;
+    let info = {};
+    try { info = await qiaDetailInfo(r.링크); } catch (e) { /* 목록 정보만으로 표시 */ }
+    return {
+      qia: true, n: r.qia제품명, maker: r.업체명 || '',
+      c: [r.품목구분, r.제형 || info.form].filter(Boolean).join(' · '),
+      sp: [...new Set((info.species || []).map(k => VD_QIA_SP[k]).filter(Boolean))],
+      e: info.efficacy || '', p: r.포장 || info.pack || '', w: r.휴약기간 || info.wd || '', u: safeUrl(r.링크),
+    };
+  } catch (e) { return null; }
+}
+async function vdLoadQia() {
+  if (!vdCatalog || !vdProducts) return;
+  const v = VENDORS.find(x => x.id === vdVendor);
+  const list = vdCatalog[v.id] || [];
+  const todo = vdProducts.filter(r => r.품명 && vdIsVendor(r.대분류, v) && !vdQia.has(r.품명) && !vdMatch(r.품명, list)).map(r => r.품명);
+  if (!todo.length) return;
+  const run = ++vdQiaRun;
+  await qiaMapLimit([...new Set(todo)], 3, async 품명 => {
+    if (run !== vdQiaRun) return;            // 다른 업체로 넘어갔으면 남은 조회는 그만둔다
+    vdQia.set(품명, await vdQiaOne(품명));
+    if (run === vdQiaRun && !vdQiaTimer) vdQiaTimer = setTimeout(() => { vdQiaTimer = null; vdRenderKeepOpen(); }, 700);
+  });
+  if (run === vdQiaRun) vdRenderKeepOpen();
+}
+// 조회 중 다시 그릴 때 펼쳐 둔 "상세 정보"가 닫히지 않게 한다
+function vdRenderKeepOpen() {
+  const el = document.getElementById('vendor-result');
+  const open = new Set([...el.querySelectorAll('.vd-card')].filter(c => c.querySelector('details[open]')).map(c => c.querySelector('.vd-name').textContent));
+  renderVendor();
+  if (open.size) el.querySelectorAll('.vd-card').forEach(c => { const d = c.querySelector('details'); if (d && open.has(c.querySelector('.vd-name').textContent)) d.open = true; });
+}
 
 // 축종 지정: 제품정보 탭의 팝업을 그대로 쓰되, 저장 뒤 이 탭을 다시 그린다
 function editVdSpecies(품명) {
