@@ -706,10 +706,10 @@ async function loadCompanyItems(period) {
 // (예전에는 최근 전표 5000건을 통째로 읽어 이름을 걸러냈다)
 async function matchCompanyNames(kw) {
   const [cust, bal] = await Promise.all([fsAll('거래처'), fsAll('잔액')]);
-  const low = String(kw).toLowerCase(), names = new Set();
+  const low = nsp(kw), names = new Set();
   for (const d of [...cust.docs, ...bal.docs]) {
     const n = d.data().회사;
-    if (n && n.toLowerCase().includes(low)) names.add(n);
+    if (n && nsp(n).includes(low)) names.add(n);
   }
   return [...names];
 }
@@ -730,6 +730,8 @@ function fmt억(n) {
   if (n >= 1e4) return Math.round(n/1e4).toLocaleString() + '만';
   return n.toLocaleString();
 }
+// 검색 비교용: 소문자로 바꾸고 띄어쓰기를 모두 없앤다 ("평산골 농장" = "평산골농장")
+function nsp(s) { return String(s==null?"":s).toLowerCase().replace(/\s+/g, ""); }
 function fmtNum(n) { return (+n||0).toLocaleString(); }
 function esc(s) { return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 // onclick="fn('${jsq(x)}')" 처럼 인라인 이벤트의 작은따옴표 문자열에 넣을 값:
@@ -1043,7 +1045,7 @@ function setStockSort(key) {
 window.setStockSort = setStockSort;
 
 async function searchStock() {
-  const q = document.getElementById('stock-q').value.trim().toLowerCase();
+  const q = nsp(document.getElementById('stock-q').value);
   const mfg = document.getElementById('stock-mfg').value;
   loading('stock-result');
 
@@ -1067,9 +1069,9 @@ async function searchStock() {
     // 품명 검색
     if (q) {
       items = items.filter(r =>
-        (r.품명||'').toLowerCase().includes(q) ||
-        (r.대분류||'').toLowerCase().includes(q) ||
-        (r.품명초성||'').includes(q)
+        nsp(r.품명).includes(q) ||
+        nsp(r.대분류).includes(q) ||
+        nsp(r.품명초성).includes(q)
       );
     }
 
@@ -1166,8 +1168,8 @@ async function searchCustProducts() {
     const companies = await loadCompanyItems();
     let hits = companies.filter(c => c.회사 === company);
     if (!hits.length) {   // 정확 일치가 없으면 이름 부분 일치
-      const kw = company.toLowerCase();
-      hits = companies.filter(c => (c.회사 || '').toLowerCase().includes(kw));
+      const kw = nsp(company);
+      hits = companies.filter(c => nsp(c.회사).includes(kw));
     }
     if (!hits.length) {
       document.getElementById('stock-result').innerHTML = `<div class="empty">${esc(company)}의 구매 내역이 없습니다</div>`;
@@ -1358,7 +1360,7 @@ function setBalanceSort(key) {
 window.setBalanceSort = setBalanceSort;
 
 async function searchBalance() {
-  const q = document.getElementById('bal-q').value.trim().toLowerCase();
+  const q = nsp(document.getElementById('bal-q').value);
   loading('balance-result');
 
   const { collection, query, getDocs, orderBy, limit, where } = window.fbFuncs;
@@ -1404,8 +1406,8 @@ async function searchBalance() {
 
     // 필터 (회사명 + 담당자 이름 검색)
     if (q) items = items.filter(r =>
-      (r.회사||'').toLowerCase().includes(q) ||
-      (r.이름||'').toLowerCase().includes(q)
+      nsp(r.회사).includes(q) ||
+      nsp(r.이름).includes(q)
     );
     if (unpaidOnly) items = items.filter(r => r.잔액 > 0);
 
@@ -1888,7 +1890,7 @@ window.setTxnSort = setTxnSort;
 
 async function searchTxn() {
   const company = document.getElementById('txn-company').value.trim();
-  const product = document.getElementById('txn-product').value.trim().toLowerCase();
+  const product = nsp(document.getElementById('txn-product').value);
   const acct    = document.getElementById('txn-acct').value;
   const from    = document.getElementById('txn-from').value;
   const to      = document.getElementById('txn-to').value;
@@ -1959,8 +1961,8 @@ async function searchTxn() {
           } else {
             fullHist = false;
             const snap = await getDocs(query(headColl, limit(5000)));   // 예전 방식 폴백
-            const kw = company.toLowerCase();
-            hdocs = snap.docs.map(d => d.data()).filter(r => (r.회사||'').toLowerCase().includes(kw));
+            const kw = nsp(company);
+            hdocs = snap.docs.map(d => d.data()).filter(r => nsp(r.회사).includes(kw));
           }
         }
       } else {
@@ -2023,8 +2025,8 @@ async function searchTxn() {
           constraints.push(limit(5000));
 
           const snap = await getDocs(query(coll, ...constraints));
-          const kw = company.toLowerCase();
-          items = snap.docs.map(d => d.data()).filter(r => (r.회사||'').toLowerCase().includes(kw));
+          const kw = nsp(company);
+          items = snap.docs.map(d => d.data()).filter(r => nsp(r.회사).includes(kw));
         }
         items.forEach(r => matchedCompanies.add(r.회사));
       }
@@ -2040,7 +2042,7 @@ async function searchTxn() {
     }
 
     // 품명 필터
-    if (product) items = items.filter(r => (r.품명||'').toLowerCase().includes(product));
+    if (product) items = items.filter(r => nsp(r.품명).includes(product));
 
     if (!items.length) { empty('txn-result'); return; }
 
@@ -2612,8 +2614,8 @@ function pickKakaoRows(rows, title) {
     const sync = () => list.querySelectorAll('input').forEach(c => { c.checked = checked[+c.dataset.i]; });
     list.addEventListener('change', e => { if (e.target.dataset.i != null) { checked[+e.target.dataset.i] = e.target.checked; count(); } });
     $('kk-q').addEventListener('input', e => {
-      const q = e.target.value.trim().toLowerCase();
-      [...list.children].forEach(n => { n.style.display = !q || labels[+n.dataset.i].toLowerCase().includes(q) ? '' : 'none'; });
+      const q = nsp(e.target.value);
+      [...list.children].forEach(n => { n.style.display = !q || nsp(labels[+n.dataset.i]).includes(q) ? '' : 'none'; });
     });
     $('kk-all').onclick = () => { visible().forEach(i => checked[i] = true); sync(); count(); };
     $('kk-none').onclick = () => { visible().forEach(i => checked[i] = false); sync(); count(); };
@@ -3556,11 +3558,11 @@ window.searchCompanyMfg = searchCompanyMfg;
 
 function renderCompanyMfg() {
   if (!cmRaw.length) { empty('cm-result'); return; }
-  const q = document.getElementById('cm-q').value.trim().toLowerCase();
+  const q = nsp(document.getElementById('cm-q').value);
   const mfg = document.getElementById('cm-mfg').value;
   const topN = +document.getElementById('cm-topn').value || 50;
 
-  const filtered = cmRaw.filter(r => (!mfg || r.제조사 === mfg) && (!q || (r.회사 || '').toLowerCase().includes(q)));
+  const filtered = cmRaw.filter(r => (!mfg || r.제조사 === mfg) && (!q || nsp(r.회사).includes(q)));
   if (!filtered.length) { empty('cm-result'); return; }
   // 순위는 매출금액 기준으로 고정(다른 열로 정렬해도 순위 번호는 바뀌지 않는다)
   const ranked = filtered.slice(0, topN).map((r, i) => ({ ...r, _순위: i + 1 }));
@@ -3668,12 +3670,12 @@ window.searchMargin = searchMargin;
 
 function renderMargin() {
   if (!mgRaw.length) { empty('mg-result'); return; }
-  const q = document.getElementById('mg-q').value.trim().toLowerCase();
+  const q = nsp(document.getElementById('mg-q').value);
   const sp = document.getElementById('mg-sp').value;
   const mfg = document.getElementById('mg-mfg').value;
   const topN = +document.getElementById('mg-topn').value || 50;
 
-  const filtered = mgRaw.filter(r => (!sp || r.축종 === sp) && (!mfg || r.대분류 === mfg) && (!q || r.품명.toLowerCase().includes(q)));
+  const filtered = mgRaw.filter(r => (!sp || r.축종 === sp) && (!mfg || r.대분류 === mfg) && (!q || nsp(r.품명).includes(q)));
   if (!filtered.length) { empty('mg-result'); return; }
   const ranked = filtered.slice(0, topN).map((r, i) => ({ ...r, _순위: i + 1 }));   // 순위는 이익금액 기준 고정
   mgItems = sortBy(ranked, mgSort, MG_SORT_TYPES);
@@ -3975,13 +3977,13 @@ function renderVendor() {
   const { rows, ours, list } = vdBuildRows(v);
   const mfgCount = new Map(); ours.forEach(r => { const k = (r.대분류 || '(없음)') + (vdIsVendor(r.대분류, v) ? '' : ' (품명으로 찾음)'); mfgCount.set(k, (mfgCount.get(k) || 0) + 1); });
   const mfgLine = mfgCount.size ? `<div class="vd-note" style="margin-top:-8px">제품정보에 등록된 제조사명: ${[...mfgCount].sort((a, b) => b[1] - a[1]).map(([m, n]) => `<b>${esc(m)}</b> ${n}개`).join(' · ')}</div>` : '';
-  const q = document.getElementById('vd-q').value.trim().toLowerCase();
+  const q = nsp(document.getElementById('vd-q').value);
   let items = rows;
   if (vdStockOnly) items = items.filter(x => x.prods.some(r => (+r.현재재고 || 0) > 0));
   if (vdSpecies !== 'all') items = items.filter(x => x.sp === vdSpecies);
   if (q) items = items.filter(x => {
     const c = x.cat || {};
-    return [x.품명, ...x.prods.map(r => r.품명), c.n, c.c, c.f, c.i, c.e, c.k].some(t => t && String(t).toLowerCase().includes(q));
+    return [x.품명, ...x.prods.map(r => r.품명), c.n, c.c, c.f, c.i, c.e, c.k].some(t => t && nsp(t).includes(q));
   });
   const home = v.home ? `<a href="${esc(v.home)}" target="_blank" rel="noopener">${esc(v.name)} 홈페이지 ↗</a>` : '';
   let head = '';
@@ -4074,7 +4076,7 @@ function setInfoSort(key) {
 window.setInfoSort = setInfoSort;
 
 async function searchInfo() {
-  const q = document.getElementById('info-q').value.trim().toLowerCase();
+  const q = nsp(document.getElementById('info-q').value);
   loading('info-result');
 
   const { collection, query, getDocs, limit } = window.fbFuncs;
@@ -4098,8 +4100,8 @@ async function searchInfo() {
 
     // 회사명 또는 담당자 이름으로 검색
     if (q) items = items.filter(r =>
-      (r.회사||'').toLowerCase().includes(q) ||
-      (r.이름||'').toLowerCase().includes(q)
+      nsp(r.회사).includes(q) ||
+      nsp(r.이름).includes(q)
     );
 
     infoItems = items;
@@ -5147,11 +5149,11 @@ async function loadWdProducts() {
 }
 
 function wdFilteredList() {
-  const q = document.getElementById('wd-q').value.trim().toLowerCase();
+  const q = nsp(document.getElementById('wd-q').value);
   let items = wdRawProducts;
   if (wdSpecies !== 'all') items = items.filter(r => r.축종 === wdSpecies);
   if (wdStockOnly) items = items.filter(r => r.현재재고 > 0);
-  if (q) items = items.filter(r => r.품명.toLowerCase().includes(q));
+  if (q) items = items.filter(r => nsp(r.품명).includes(q));
   return items.sort((a,b) => b.현재재고 - a.현재재고 || a.품명.localeCompare(b.품명));
 }
 
