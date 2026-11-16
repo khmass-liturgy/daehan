@@ -1765,7 +1765,7 @@ function balanceStatementHtml(company, fb, res, period, title) {
   .box .amt { font-size:22px; font-weight:700; }
   .box .rt { display:flex; align-items:center; gap:28px; }
   .box .sign { font-size:13px; white-space:nowrap; }
-  .box .sign .sp { display:inline-block; width:90px; }
+  .box .sign .sp { display:inline-block; width:117px; }
   table { width:100%; border-collapse:collapse; }
   thead th { background:#eee; border:1px solid #999; padding:5px 6px; font-size:11px; }
   thead { display:table-header-group; }
@@ -1780,7 +1780,7 @@ function balanceStatementHtml(company, fb, res, period, title) {
 </style></head><body>
   <h1>${esc(title)}</h1>
   <div class="meta">출력일 ${todayStr()}${asOf ? ' · 잔액 ' + asOf : ''}</div>
-  <div class="box"><div><b>${esc(company)}</b>${fb ? '<div class="meta" style="margin:2px 0 0">현재 미수금(잔액)</div>' : ''}</div><div class="rt"><span class="sign">확인 :<span class="sp"></span>(인)</span>${fb ? `<div class="amt">${fmtNum(balance)}원</div>` : ''}</div></div>
+  <div class="box"><div><b>${esc(company)}</b>${fb ? '<div class="meta" style="margin:2px 0 0">현재 미수금(잔액)</div>' : ''}</div><div class="rt"><span class="sign">확인 :<span class="sp"></span>(사인)</span>${fb ? `<div class="amt">${fmtNum(balance)}원</div>` : ''}</div></div>
   ${balSection}
   ${perSection}
 </body></html>`;
